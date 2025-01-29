@@ -2,7 +2,7 @@
 This is the code and data I used to check various LLMs for compliance in requests to compose political speech critical of various governments.
 
 Final result:
-[compliance graph](reports/government_criticism_analysis.png)
+[compliance graph](report/government_criticism_analysis.png)
 
 Reproduction:
 ```bash

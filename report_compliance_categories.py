@@ -38,7 +38,7 @@ def main():
         return
     
     # Create reports directory
-    out_dir = "reports"
+    out_dir = "report"
     os.makedirs(out_dir, exist_ok=True)
     
     # Get unique models and categories
