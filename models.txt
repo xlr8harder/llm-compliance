@@ -1,0 +1,7 @@
+anthropic/claude-3.5-sonnet
+deepseek/deepseek-chat
+google/gemini-pro-1.5
+meta-llama/llama-3.3-70b-instruct
+qwen/qwen-2.5-72b-instruct
+x-ai/grok-2-1212
+openai/gpt-4o-2024-11-20
