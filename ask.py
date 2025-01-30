@@ -15,7 +15,7 @@ def load_questions(file_path):
             questions.append(json.loads(line.strip()))
     return questions
 
-def retry_with_backoff(func, max_retries=5, initial_delay=1):
+def retry_with_backoff(func, max_retries=10, initial_delay=1):
     """
     Retry a function with exponential backoff.
     
@@ -37,7 +37,7 @@ def retry_with_backoff(func, max_retries=5, initial_delay=1):
             print(f"Attempt {retries} failed with error: {str(e)}. Retrying in {delay} seconds...")
             time.sleep(delay)
 
-    return {"error": f"Failed after {max_retries} retries"}
+    raise ValueError("No valid responses received.")
 
 def ask_question(question, model, api_key):
     """Send a question to the appropriate API endpoint based on model name."""
