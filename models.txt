@@ -7,3 +7,5 @@ x-ai/grok-2-1212
 openai/gpt-4o-2024-11-20
 deepseek/deepseek-r1
 openai/o1-preview
+qwen/qwen-max
+perplexity/r1-1776
