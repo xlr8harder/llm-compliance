@@ -129,7 +129,7 @@ def main():
     # Position model names below category labels
     ax.set_xticks(model_positions)
     ax.set_xticklabels([model.split('/')[-1] for model in models], 
-                       rotation=0, ha='center', fontsize=9)
+                       rotation=0, ha='center', fontsize=7)
     ax.tick_params(axis='x', pad=80)  # Increased padding between axis and labels
     
     title = "AI Model Responses: Government Criticism Analysis"
