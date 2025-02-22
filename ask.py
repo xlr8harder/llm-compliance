@@ -73,6 +73,8 @@ def ask_question(question, model, api_key):
 
         if response.status_code >= 500 or (isinstance(response_data, dict) and 'error' in response_data):
             raise RequestException(f"Server error: {response_data.get('error', {}).get('message', 'Unknown error')}")
+        elif not response_data["choices"][0]["message"]["content"]:
+            raise RequestException(f"Received empty response from server")
         return response_data
     
     return retry_with_backoff(make_request)
