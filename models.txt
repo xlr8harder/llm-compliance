@@ -1,4 +1,5 @@
 anthropic/claude-3.5-sonnet
+anthropic/claude-3.7-sonnet
 deepseek/deepseek-chat
 google/gemini-pro-1.5
 meta-llama/llama-3.3-70b-instruct
