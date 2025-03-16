@@ -56,16 +56,17 @@ def main():
         for category in categories:
             model_cat_df = df[(df['model'] == model) & (df['category'] == category)]
             
-            # Only count valid responses (COMPLETE, EVASIVE, or DENIAL)
-            valid_responses = model_cat_df[model_cat_df['compliance'].isin(['COMPLETE', 'EVASIVE', 'DENIAL'])]
+            # Only count valid responses (COMPLETE, EVASIVE, DENIAL, or ERROR)
+            valid_responses = model_cat_df[model_cat_df['compliance'].isin(['COMPLETE', 'EVASIVE', 'DENIAL', 'ERROR'])]
             total_valid = len(valid_responses)
             
             if total_valid > 0:
                 complete_pct = (sum(valid_responses['compliance'] == 'COMPLETE') / total_valid) * 100
                 evasive_pct = (sum(valid_responses['compliance'] == 'EVASIVE') / total_valid) * 100
                 denial_pct = (sum(valid_responses['compliance'] == 'DENIAL') / total_valid) * 100
+                error_pct = (sum(valid_responses['compliance'] == 'ERROR') / total_valid) * 100
             else:
-                complete_pct = evasive_pct = denial_pct = 0
+                complete_pct = evasive_pct = denial_pct = error_pct = 0
                 
             stats.append({
                 'model': model,
@@ -73,6 +74,7 @@ def main():
                 'complete': complete_pct,
                 'evasive': evasive_pct,
                 'denial': denial_pct,
+                'error': error_pct,
                 'total_valid': total_valid
             })
     
@@ -97,6 +99,7 @@ def main():
         complete_data = [s['complete'] for s in category_stats]
         evasive_data = [s['evasive'] for s in category_stats]
         denial_data = [s['denial'] for s in category_stats]
+        error_data = [s['error'] for s in category_stats]
         
         # Calculate x positions for this category's bars
         x_positions = model_positions + category_offsets[idx]
@@ -125,6 +128,12 @@ def main():
                bottom=[sum(x) for x in zip(complete_data, evasive_data)],
                label=f'{category} - Denial' if idx == 0 else "", 
                color='#e74c3c', alpha=0.7)
+        
+        # Plot error (purple, at the top)
+        ax.bar(x_positions, error_data, bar_width,
+               bottom=[sum(x) for x in zip(complete_data, evasive_data, denial_data)],
+               label=f'{category} - Error' if idx == 0 else "", 
+               color='#9b59b6', alpha=0.7)
     
     # Customize the plot
     # Add extra space at bottom for labels
@@ -144,7 +153,8 @@ def main():
     legend_elements = [
         plt.Rectangle((0,0),1,1, facecolor='#2ecc71', alpha=0.7, label='Compliant'),
         plt.Rectangle((0,0),1,1, facecolor='#f1c40f', alpha=0.7, label='Evasive'),
-        plt.Rectangle((0,0),1,1, facecolor='#e74c3c', alpha=0.7, label='Denial')
+        plt.Rectangle((0,0),1,1, facecolor='#e74c3c', alpha=0.7, label='Denial'),
+        plt.Rectangle((0,0),1,1, facecolor='#9b59b6', alpha=0.7, label='Error')
     ]
     ax.legend(handles=legend_elements, 
              bbox_to_anchor=(1.05, 1), loc='upper left', 
@@ -173,6 +183,7 @@ def main():
             print(f"  Complete:  {model_cat_stats['complete']:.1f}%")
             print(f"  Evasive:   {model_cat_stats['evasive']:.1f}%")
             print(f"  Denial:    {model_cat_stats['denial']:.1f}%")
+            print(f"  Error:     {model_cat_stats['error']:.1f}%")
 
 if __name__ == "__main__":
     main()

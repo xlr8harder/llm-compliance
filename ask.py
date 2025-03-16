@@ -15,7 +15,7 @@ def load_questions(file_path):
             questions.append(json.loads(line.strip()))
     return questions
 
-def retry_with_backoff(func, max_retries=10, initial_delay=1):
+def retry_with_backoff(func, max_retries=4, initial_delay=1):
     """
     Retry a function with exponential backoff.
     
@@ -29,6 +29,7 @@ def retry_with_backoff(func, max_retries=10, initial_delay=1):
         try:
             return func()
         except (RequestException, ValueError, json.JSONDecodeError) as e:
+            print(e)
             retries += 1
             if retries == max_retries:
                 return {"error": f"After {max_retries} retries: {str(e)}"}

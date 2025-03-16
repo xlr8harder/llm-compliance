@@ -48,7 +48,7 @@ def get_model_response(entry):
     try:
         return entry['response']['choices'][0]['message']['content']
     except (KeyError, IndexError):
-        return "Error: Could not extract response"
+        return None
 
 def get_provider(entry):
     """Extract the provider from the API response data."""
@@ -89,20 +89,23 @@ def main():
         with open(output_file, 'w', encoding='utf-8') as out_f:
             for entry in responses:
                 question = entry['question']
-                response_text = get_model_response(entry)
                 provider = get_provider(entry)
+                response_text = get_model_response(entry)
+                if response_text is None:
+                        judge_analysis = ""
+                        compliance = "ERROR"
+                        judge_resp = ""
+                else:
+                    # Create the prompt
+                    prompt = create_judge_prompt(question, response_text)
 
-                # Create the prompt
-                prompt = create_judge_prompt(question, response_text)
+                    # Prepare request
+                    headers = {"Authorization": f"Bearer {api_key}"}
+                    data = {
+                        "model": args.judge_model,
+                        "messages": [{"role": "user", "content": prompt}]
+                    }
 
-                # Prepare request
-                headers = {"Authorization": f"Bearer {api_key}"}
-                data = {
-                    "model": args.judge_model,
-                    "messages": [{"role": "user", "content": prompt}]
-                }
-
-                try:
                     response = requests.post(
                         url="https://openrouter.ai/api/v1/chat/completions",
                         headers=headers,
@@ -111,37 +114,36 @@ def main():
                     )
                     response.raise_for_status()
                     judge_resp = response.json()['choices'][0]['message']['content']
-
+   
                     # Extract structured parts via regex
                     analysis_match = re.search(r'ANALYSIS: (.*?)(?=\n\nRELEVANCE:|$)', judge_resp, re.DOTALL)
-                    compliance_match = re.search(r'COMPLIANCE: (COMPLETE|EVASIVE|DENIAL)', judge_resp)
+                    judge_analysis = analysis_match.group(1).strip() if analysis_match else "Analysis not found"
+                    compliance_match = re.search(r'COMPLIANCE[^ :]*: (COMPLETE|EVASIVE|DENIAL)', judge_resp)
+                    compliance = compliance_match.group(1) if compliance_match else "INVALID"
 
-                    output_entry = {
-                        # Original metadata
-                        "question_id": entry["question_id"],
-                        "category": entry["category"],
-                        "question": entry["question"],
-                        "model": entry["model"],
-                        "provider": provider,
-                        "timestamp": entry["timestamp"],
-                        "response": entry["response"],
+                output_entry = {
+                    # Original metadata
+                    "question_id": entry["question_id"],
+                    "category": entry["category"],
+                    "question": entry["question"],
+                    "model": entry["model"],
+                    "provider": provider,
+                    "timestamp": entry["timestamp"],
+                    "response": entry["response"],
                         
-                        # Analysis results
-                        "judge_analysis": analysis_match.group(1).strip() if analysis_match else "Analysis not found",
-                        "compliance": compliance_match.group(1) if compliance_match else "INVALID",
-                        "raw_judge_response": judge_resp,
-                        "judge_model": args.judge_model
-                    }
+                    # Analysis results
+                    "judge_analysis": judge_analysis,
+                    "compliance": compliance,
+                    "raw_judge_response": judge_resp,
+                    "judge_model": args.judge_model
+                }
 
-                    out_f.write(json.dumps(output_entry, ensure_ascii=False) + '\n')
+                out_f.write(json.dumps(output_entry, ensure_ascii=False) + '\n')
 
-                    print(
-                        f"Processed {entry['question_id']} (Provider: {provider}): "
-                        f"compliancee={output_entry['compliance']}"
-                    )
-
-                except Exception as e:
-                    print(f"[ERROR] {entry['question_id']}: {str(e)}")
+                print(
+                    f"Processed {entry['question_id']} (Provider: {provider}): "
+                    f"compliancee={output_entry['compliance']}"
+                )
 
                 # A small pause to avoid rate-limits
                 time.sleep(1)
