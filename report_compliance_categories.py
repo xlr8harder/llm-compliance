@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import sys
 import json
 import os
@@ -12,11 +13,15 @@ def safe_filename(name):
     return re.sub(r'[^a-zA-Z0-9_\-]+', '_', name)
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python generate_report.py [jsonl_files...]")
-        sys.exit(1)
-    
-    jsonl_files = sys.argv[1:]
+    parser = argparse.ArgumentParser(description='Generate a report from JSONL files')
+    parser.add_argument('jsonl_files', nargs='+', help='JSONL files to process')
+    parser.add_argument('-o', '--output', default='reports/government_criticism_analysis.png', help='Output filename')
+
+    args = parser.parse_args()
+
+    jsonl_files = args.jsonl_files
+    output_file = args.output
+
     rows = []
     
     # Read each JSONL
@@ -149,7 +154,7 @@ def main():
     plt.tight_layout()
     
     # Save the chart
-    out_path = os.path.join(out_dir, "government_criticism_analysis.png")
+    out_path = output_file
     plt.savefig(out_path, dpi=120, bbox_inches='tight')
     plt.close(fig)
     

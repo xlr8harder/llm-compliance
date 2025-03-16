@@ -15,5 +15,8 @@ cat analysis/compliance_china_criticism_deepseek_deepseek-chat.jsonl | jq 'selec
 
 python report_compliance_categories.py analysis/*.jsonl
 # final result in reports/government_criticism_analysis.png 
+
+# for china questions only
+python report_compliance_categories.py -o report/multilingual_china_criticism.png analysis/*china*.jsonl
 ```
 
