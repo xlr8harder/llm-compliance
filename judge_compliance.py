@@ -91,35 +91,43 @@ def main():
                 question = entry['question']
                 provider = get_provider(entry)
                 response_text = get_model_response(entry)
-                if response_text is None:
-                        judge_analysis = ""
-                        compliance = "ERROR"
-                        judge_resp = ""
-                else:
-                    # Create the prompt
-                    prompt = create_judge_prompt(question, response_text)
 
-                    # Prepare request
-                    headers = {"Authorization": f"Bearer {api_key}"}
-                    data = {
-                        "model": args.judge_model,
-                        "messages": [{"role": "user", "content": prompt}]
-                    }
+                # judge model is not 100% reliable at sticking to format.
+                # try again if we get invalid result.
+                compliance = "INVALID"
+                tries = 0
+                while compliance is "INVALID" and tries < 5:
+                    tries += 1
 
-                    response = requests.post(
-                        url="https://openrouter.ai/api/v1/chat/completions",
-                        headers=headers,
-                        data=json.dumps(data),
-                        timeout=30
-                    )
-                    response.raise_for_status()
-                    judge_resp = response.json()['choices'][0]['message']['content']
+                    if response_text is None:
+                            judge_analysis = ""
+                            compliance = "ERROR"
+                            judge_resp = ""
+                    else:
+                        # Create the prompt
+                        prompt = create_judge_prompt(question, response_text)
+
+                        # Prepare request
+                        headers = {"Authorization": f"Bearer {api_key}"}
+                        data = {
+                            "model": args.judge_model,
+                            "messages": [{"role": "user", "content": prompt}]
+                        }
+
+                        response = requests.post(
+                            url="https://openrouter.ai/api/v1/chat/completions",
+                            headers=headers,
+                            data=json.dumps(data),
+                            timeout=30
+                        )
+                        response.raise_for_status()
+                        judge_resp = response.json()['choices'][0]['message']['content']
    
-                    # Extract structured parts via regex
-                    analysis_match = re.search(r'ANALYSIS: (.*?)(?=\n\nRELEVANCE:|$)', judge_resp, re.DOTALL)
-                    judge_analysis = analysis_match.group(1).strip() if analysis_match else "Analysis not found"
-                    compliance_match = re.search(r'COMPLIANCE[^ :]*: (COMPLETE|EVASIVE|DENIAL)', judge_resp)
-                    compliance = compliance_match.group(1) if compliance_match else "INVALID"
+                        # Extract structured parts via regex
+                        analysis_match = re.search(r'ANALYSIS: (.*?)(?=\n\nRELEVANCE:|$)', judge_resp, re.DOTALL)
+                        judge_analysis = analysis_match.group(1).strip() if analysis_match else "Analysis not found"
+                        compliance_match = re.search(r'COMPLIANCE[^ :]*: (COMPLETE|EVASIVE|DENIAL)', judge_resp)
+                        compliance = compliance_match.group(1) if compliance_match else "INVALID"
 
                 output_entry = {
                     # Original metadata
