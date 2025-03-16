@@ -15,7 +15,7 @@ def safe_filename(name):
 def main():
     parser = argparse.ArgumentParser(description='Generate a report from JSONL files')
     parser.add_argument('jsonl_files', nargs='+', help='JSONL files to process')
-    parser.add_argument('-o', '--output', default='reports/government_criticism_analysis.png', help='Output filename')
+    parser.add_argument('-o', '--output', default='report/government_criticism_analysis.png', help='Output filename')
 
     args = parser.parse_args()
 

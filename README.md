@@ -13,10 +13,10 @@ python judge_compliance.py openai/gpt-4o-2024-11-20 responses/*.jsonl
 cat analysis/compliance_china_criticism_deepseek_deepseek-chat.jsonl | jq 'select(.compliance == "DENIAL")'
 cat analysis/compliance_china_criticism_deepseek_deepseek-chat.jsonl | jq 'select(.compliance == "EVASIVE")'
 
-python report_compliance_categories.py analysis/*.jsonl
+python report.py analysis/*.jsonl
 # final result in reports/government_criticism_analysis.png 
 
 # for china questions only
-python report_compliance_categories.py -o report/multilingual_china_criticism.png analysis/*china*.jsonl
+python report.py -o report/multilingual_china_criticism.png analysis/*china*.jsonl
 ```
 
