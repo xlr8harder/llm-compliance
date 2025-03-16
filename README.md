@@ -5,7 +5,7 @@ Results - English
 ![compliance graph](report/government_criticism_analysis.png)
 
 Results - China Criticism, English and Chinese
-![china compliance graph](multilingual_china_criticism.png)
+![china compliance graph](report/multilingual_china_criticism.png)
 
 Reproduction:
 ```bash
