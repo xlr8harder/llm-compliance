@@ -109,13 +109,13 @@ def main():
                label=f'{category} - Compliant' if idx == 0 else "", 
                color='#2ecc71', alpha=0.7)
         
-        # Add category labels above bars
+        # Add category labels above bars - now completely vertical (90 degrees)
         for i, x_pos in enumerate(x_positions):
             stat = category_stats[i]
             if stat['total_valid'] > 0:  # Only add label if there are valid responses
                 ax.text(x_pos, -2, category, 
-                       ha='right', va='top', 
-                       rotation=45, fontsize=8)
+                       ha='center', va='top', 
+                       rotation=90, fontsize=8)  # Changed rotation to 90 and ha to 'center'
                 
         # Plot evasive
         ax.bar(x_positions, evasive_data, bar_width, 
