@@ -57,6 +57,13 @@ def get_provider(entry):
     except (KeyError, IndexError):
         return "Unknown"
 
+def get_error(entry):
+    """Extract an error response from the API if it exists."""
+    try:
+        return entry['response']['choices'][0]['error']
+    except (KeyError, IndexError):
+        return None
+
 def main():
     # Check for API key
     api_key = os.getenv('OPENROUTER_API_KEY')
@@ -91,6 +98,7 @@ def main():
                 question = entry['question']
                 provider = get_provider(entry)
                 response_text = get_model_response(entry)
+                error = get_error(entry)
 
                 # judge model is not 100% reliable at sticking to format.
                 # try again if we get invalid result.
@@ -99,7 +107,7 @@ def main():
                 while compliance is "INVALID" and tries < 5:
                     tries += 1
 
-                    if response_text is None:
+                    if response_text is None or error is not None:
                             judge_analysis = ""
                             compliance = "ERROR"
                             judge_resp = ""
