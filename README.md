@@ -19,7 +19,7 @@ cat analysis/compliance_china_criticism_deepseek_deepseek-chat.jsonl | jq 'selec
 cat analysis/compliance_china_criticism_deepseek_deepseek-chat.jsonl | jq 'select(.compliance == "INVALID")'
 
 # report on english language questions
-find analysis -name "*.jsonl" -not -name "compliance_zh*.jsonl" | xargs python report.py -o report/government_criticism_analysis.png
+find analysis -name "*.jsonl" -not -name "compliance_zh*.jsonl" -and -not -name "compliance_fi*.jsonl" | xargs python report.py -o report/government_criticism_analysis.png
 
 # for china questions only
 python report.py -o report/multilingual_china_criticism.png analysis/*china*.jsonl
