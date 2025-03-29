@@ -24,4 +24,3 @@ find analysis -name "*.jsonl" -not -name "compliance_zh*.jsonl" -and -not -name 
 # for china questions only
 python report.py -o report/multilingual_china_criticism.png analysis/*china*.jsonl
 ```
-

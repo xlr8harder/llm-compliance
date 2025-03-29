@@ -10,3 +10,4 @@ deepseek/deepseek-r1
 openai/o1-preview
 qwen/qwen-max
 perplexity/r1-1776
+deepseek/deepseek-chat-v3-0324
