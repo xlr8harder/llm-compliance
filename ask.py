@@ -15,6 +15,21 @@ def load_questions(file_path):
             questions.append(json.loads(line.strip()))
     return questions
 
+def load_existing_responses(output_file):
+    """Load existing responses from output file and return a set of processed question IDs."""
+    processed_ids = set()
+    
+    if output_file.exists():
+        with open(output_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    entry = json.loads(line.strip())
+                    processed_ids.add(entry["question_id"])
+                except (json.JSONDecodeError, KeyError) as e:
+                    print(f"Warning: Could not parse line in output file: {str(e)}")
+    
+    return processed_ids
+
 def retry_with_backoff(func, max_retries=8, initial_delay=1):
     """
     Retry a function with exponential backoff.
@@ -80,27 +95,45 @@ def ask_question(question, model, api_key):
     
     return retry_with_backoff(make_request)
 
-def process_questions(questions_file, model, api_key):
-    """Process all questions in a file and save responses."""
+def process_questions(questions_file, model, api_key, force_restart=False):
+    """Process all questions in a file and save responses. Resume if output file exists."""
     output_dir = Path("responses")
     output_dir.mkdir(exist_ok=True)
     
     questions_filename = Path(questions_file).stem
     output_file = output_dir / f"{questions_filename}_{model.replace('/', '_')}.jsonl"
     
-    if output_file.exists():
-        print(f"Output file '{output_file}' already exists. Skipping.")
-        return
-
+    # Load all questions from input file
     questions = load_questions(questions_file)
     total_questions = len(questions)
     
+    # Skip if output file exists and has the correct number of lines (unless force_restart is True)
+    if output_file.exists() and not force_restart:
+        processed_ids = load_existing_responses(output_file)
+        
+        if len(processed_ids) == total_questions:
+            print(f"Output file '{output_file}' already contains all {total_questions} responses. Skipping.")
+            return
+        elif len(processed_ids) > 0:
+            print(f"Found {len(processed_ids)}/{total_questions} responses in existing output file. Resuming from where we left off.")
+    else:
+        processed_ids = set()
+        if force_restart and output_file.exists():
+            print(f"Force restart requested. Removing existing output file '{output_file}'.")
+            output_file.unlink()
+    
     api_type = "Fireworks" if model.startswith("accounts/fireworks") else "OpenRouter"
-    print(f"Processing {total_questions} questions from {questions_file}")
+    print(f"Processing questions from {questions_file}")
     print(f"Using {api_type} API")
     
     for i, question_data in enumerate(questions, 1):
-        print(f"Processing question {i}/{total_questions}: {question_data['id']}")
+        question_id = question_data['id']
+        
+        # Skip questions that have already been processed
+        if question_id in processed_ids:
+            continue
+        
+        print(f"Processing question {i}/{total_questions}: {question_id}")
         
         response = ask_question(
             question_data['question'],
@@ -109,7 +142,7 @@ def process_questions(questions_file, model, api_key):
         )
         
         output_entry = {
-            "question_id": question_data['id'],
+            "question_id": question_id,
             "category": question_data['category'],
             "question": question_data['question'],
             "model": model,
@@ -120,6 +153,9 @@ def process_questions(questions_file, model, api_key):
         with open(output_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps(output_entry, ensure_ascii=False) + '\n')
         
+        # Mark this question as processed
+        processed_ids.add(question_id)
+        
         time.sleep(1)
     
     print(f"Responses saved to: {output_file}")
@@ -129,6 +165,7 @@ def main():
     parser = argparse.ArgumentParser(description='Ask questions to AI models via OpenRouter or Fireworks API')
     parser.add_argument('model', help='Model identifier (e.g., deepseek/deepseek-r1 or accounts/fireworks/models/deepseek-v3)')
     parser.add_argument('questions_files', nargs='+', help='One or more JSONL files containing questions')
+    parser.add_argument('--force-restart', action='store_true', help='Ignore existing output file and start from beginning')
     
     args = parser.parse_args()
     
@@ -144,7 +181,8 @@ def main():
             process_questions(
                 questions_file,
                 args.model,
-                api_key
+                api_key,
+                args.force_restart
             )
         except Exception as e:
             print(f"Error processing {questions_file}: {str(e)}")
