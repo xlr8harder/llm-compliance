@@ -11,3 +11,6 @@ openai/o1-preview
 qwen/qwen-max
 perplexity/r1-1776
 deepseek/deepseek-chat-v3-0324
+openrouter/quasar-alpha
+meta-llama/llama-4-maverick
+meta-llama/llama-4-scout

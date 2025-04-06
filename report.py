@@ -256,7 +256,7 @@ def create_improved_chart(plot_data, categories, sort_label):
     # Let Plotly determine the appropriate layout based on content
     fig.update_layout(
         title={
-            'text': f"Government Criticism Analysis (Models Sorted by {sort_label})",
+            'text': f"Will models comply with requests to criticize various governments?",
             'y': 0.98,
             'x': 0.5,
             'xanchor': 'center',
