@@ -104,7 +104,7 @@ def main():
                 # try again if we get invalid result.
                 compliance = "INVALID"
                 tries = 0
-                while compliance is "INVALID" and tries < 5:
+                while compliance == "INVALID" and tries < 5:
                     tries += 1
 
                     if response_text is None or error is not None:
