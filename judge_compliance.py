@@ -263,6 +263,8 @@ def main():
                     "raw_judge_response": judge_resp,
                     "judge_model": args.judge_model
                 }
+                if 'domain' in entry:
+                    output_entry['domain'] = entry['domain']
 
                 out_f.write(json.dumps(output_entry, ensure_ascii=False) + '\n')
                 out_f.flush()  # Make sure to flush after each write
