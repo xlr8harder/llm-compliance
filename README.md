@@ -1,6 +1,15 @@
 # LLM compliance testing
 This is the code and data I used to check various LLMs for compliance in requests to compose political speech critical of various governments.
 
+## ☕ Support Me on Ko-fi
+
+LLM evaluations are pricy to run.  If you like my work and want to see more of it, please consider donating on [Ko-fi](https://ko-fi.com/xlr8harder)!
+Your support helps me keep building cool stuff.
+
+[![Ko-Fi](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-F16061?style=flat-square&logo=ko-fi&logoColor=white)](https://ko-fi.com/xlr8harder)
+
+## Results
+
 Results - English
 ![compliance graph](report/government_criticism_analysis.png)
 
@@ -10,7 +19,7 @@ Results - China Criticism, English and Chinese
 Reproduction:
 ```bash
 export OPENROUTER_API_KEY=...
-for model in `cat models.txt` ; do echo $model;  python ask.py $model questions/*.jsonl & done 
+for model in `cat models.txt` ; do echo $model;  python ask.py $model questions/*.jsonl & done
 python judge_compliance.py openai/gpt-4o-2024-11-20 responses/*.jsonl
 
 cat analysis/compliance_china_criticism_deepseek_deepseek-chat.jsonl | jq 'select(.compliance == "DENIAL")'
