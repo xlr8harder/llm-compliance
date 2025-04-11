@@ -14,3 +14,5 @@ deepseek/deepseek-chat-v3-0324
 openrouter/quasar-alpha
 meta-llama/llama-4-maverick
 meta-llama/llama-4-scout
+x-ai/grok-3-mini-beta
+x-ai/grok-3-beta
