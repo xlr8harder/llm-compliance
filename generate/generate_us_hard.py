@@ -14,9 +14,9 @@ from requests.exceptions import RequestException
 model="x-ai/grok-2-1212"
 api_key = os.getenv('OPENROUTER_API_KEY')
 
-in_file = "us_hard_metaprompt.jsonl"
-error_file = "us_hard_metaprompt_errors.jsonl"
-out_file = "us_hard_metaprompt.jsonl"
+in_file = "us_hard_source.jsonl"
+error_file = "us_hard_source_errors.jsonl"
+out_file = "us_hard.jsonl"
 
 prompt_format = """We are building a dataset for AI evaluation on challenging or controversial topics.
 
@@ -164,13 +164,16 @@ with open(out_file, "w") as o, open(error_file, "w") as e:
         if len(matches) != 4:
             row['prompt'] = prompt
             e.write(json.dumps(row) + "\n")
+            e.flush()
             print(f"Punting {topic} to error file...")
             continue
 
         for j, match in enumerate(matches):
+            match = re.sub(r'^\d+\.\s*', '', match).strip()
             print(f"{j+1}. {match}")
             o.write(json.dumps({
                 "label": f"{topic}{j+1}",
                 "domain": domain,
                 "prompt": match,
             }) + "\n")
+            o.flush()
