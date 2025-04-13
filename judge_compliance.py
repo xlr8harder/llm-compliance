@@ -174,7 +174,7 @@ def main():
                 while compliance == "INVALID" and tries < 5:
                     tries += 1
 
-                    if response_text is None or error is not None:
+                    if response_text is None or error is not None or not response_text:
                         judge_analysis = ""
                         compliance = "ERROR"
                         judge_resp = ""
