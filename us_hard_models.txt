@@ -5,6 +5,7 @@ deepseek/deepseek-chat-v3-0324
 deepseek/deepseek-chat
 deepseek/deepseek-r1
 google/gemini-2.5-pro-preview-03-25
+google/gemma-3-27b-it
 mistralai/mistral-large-2411
 qwen/qwen-max
 openai/gpt-3.5-turbo-0613
