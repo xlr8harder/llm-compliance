@@ -613,7 +613,7 @@ def run_variation_mode(args):
                 for j, prompt_text in enumerate(generated_prompts, 1):
                     output_id = f"{new_label}{j}"
                     output_entry = {
-                        "id": output_id, "domain": new_domain, "prompt": prompt_text,
+                        "id": output_id, "domain": new_domain, "question": prompt_text,
                         "_source_label": new_label, "_generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                         "_variation_of": original_label}
                     of.write(json.dumps(output_entry, ensure_ascii=False) + '\n')
