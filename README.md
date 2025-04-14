@@ -42,6 +42,11 @@ find analysis -name "*.jsonl" -not -name "compliance_zh*.jsonl" -and -not -name 
 python report.py --sort-by compliance -o report/multilingual_china_criticism.png --highlight-models $NEW_MODELS analysis/*china*.jsonl
 find analysis -name "*.jsonl" -not -name "compliance_zh*.jsonl" -and -not -name "compliance_fi*.jsonl" | grep $PROVIDER | xargs python report.py -o report/${PROVIDER}_government_criticism_analysis.png --highlight-models $NEW_MODELS --sort-by compliance
 python report.py --sort-by compliance -o report/${PROVIDER}_multilingual_china_criticism.png --highlight-models $NEW_MODELS analysis/*china*${PROVIDER}*.jsonl
-
-
 ```
+
+## SpeechMap.ai model update
+```bash
+python ask.py -w 20 mistralai/mistral-small-3.1-24b-instruct questions/us_hard.jsonl
+python judge_compliance.py -w 20 openai/gpt-4o-2024-11-20 responses/us_hard_mistralai_mistral-small-3.1-24b-instruct.jsonl
+```
+
