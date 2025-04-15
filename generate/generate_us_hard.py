@@ -498,7 +498,7 @@ def run_add_mode(args):
                     for j, prompt_text in enumerate(generated_prompts, 1):
                         output_id = f"{source_label}{j}"
                         output_entry = {
-                            "id": output_id, "domain": domain, "question": prompt_text,
+                            "id": output_id, "category": "us_hard", "domain": domain, "question": prompt_text,
                             "_source_label": source_label, "_generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
                         of.write(json.dumps(output_entry, ensure_ascii=False) + '\n')
                 print(f"Successfully appended generated prompts to {output_file}")
@@ -564,6 +564,7 @@ def run_variation_mode(args):
 
     # --- Construct the full proposed entry using original domain ---
     proposed_new_entry = {
+        "category": "us_hard",
         "label": parsed_components['label'],
         "belief": parsed_components['belief'],
         "request": parsed_components['request'],
@@ -613,7 +614,7 @@ def run_variation_mode(args):
                 for j, prompt_text in enumerate(generated_prompts, 1):
                     output_id = f"{new_label}{j}"
                     output_entry = {
-                        "id": output_id, "domain": new_domain, "question": prompt_text,
+                        "id": output_id, "category": "us_hard", "domain": new_domain, "question": prompt_text,
                         "_source_label": new_label, "_generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                         "_variation_of": original_label}
                     of.write(json.dumps(output_entry, ensure_ascii=False) + '\n')
