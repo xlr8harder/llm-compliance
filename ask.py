@@ -6,36 +6,52 @@ import requests
 import time
 import tempfile
 import random
-import threading 
+import threading
 import traceback
 import concurrent.futures
+import sys
 from pathlib import Path
 from requests.exceptions import RequestException
 
 # --- Constants ---
-TRANSIENT_FAILURE_MARKER = None
+TRANSIENT_FAILURE_MARKER = object() # Use a unique object marker
 # Add a counter for overall progress reporting
 PROGRESS_COUNTER = 0
 PROGRESS_LOCK = threading.Lock()
 
+# --- Global Cache for OpenAI Models ---
+OPENAI_MODELS_CACHE = None
+OPENAI_MODELS_CHECK_DONE = False
+OPENAI_MODELS_LOCK = threading.Lock()
+
+# --- API Endpoint Constants ---
+OPENAI_API_BASE = "https://api.openai.com/v1"
+OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
+FIREWORKS_API_BASE = "https://api.fireworks.ai/inference/v1"
+
 # --- Helper Functions for Identifying Response Types ---
 def is_permanent_api_error(resp):
     """Checks if the response structure indicates a permanent error reported by the API provider."""
+    # This function seems generic enough for OpenAI, OpenRouter, Fireworks errors
     try:
+        # Case 1: Error within choices (e.g., content filter)
         if (isinstance(resp, dict) and
             "choices" in resp and
             isinstance(resp["choices"], list) and
             len(resp["choices"]) > 0 and
             isinstance(resp["choices"][0], dict) and
-            "error" in resp["choices"][0] and
-            resp["choices"][0]["error"] is not None):
+            "error" in resp["choices"][0] and # Check if 'error' key exists
+             resp["choices"][0]["error"] is not None): # Check if error value is not None
             return True
+        # Case 2: Top-level error (common for auth, rate limits AFTER retries, invalid request)
         if (isinstance(resp, dict) and
             "error" in resp and
-            isinstance(resp["error"], (dict, str)) and resp["error"] and
-            "choices" not in resp):
+            isinstance(resp["error"], (dict, str)) and resp["error"] and # Error is present and not empty/None
+            "choices" not in resp): # Often indicates request didn't get to model completion stage
              return True
     except (TypeError, KeyError, IndexError):
+        # Malformed response might indicate an error, but hard to classify as permanent *here*.
+        # Let retry logic handle network/decode issues. If it persists, it gets logged eventually.
         return False
     return False
 
@@ -47,15 +63,17 @@ def is_empty_content_response(resp):
             isinstance(resp["choices"], list) and
             len(resp["choices"]) > 0 and
             isinstance(resp["choices"][0], dict) and
-            "error" not in resp["choices"][0] and
+            resp["choices"][0].get("error") is None and # Explicitly check error is None or missing
             isinstance(resp["choices"][0].get("message"), dict) and
-            resp["choices"][0]["message"].get("content") == ""):
+            resp["choices"][0]["message"].get("content") == ""): # Check for strictly empty string
             return True
     except (TypeError, KeyError, IndexError):
         return False
     return False
 
 # --- Loading and Cleanup Functions ---
+# load_questions, load_existing_responses, cleanup_permanent_errors remain unchanged
+# (Assuming they are correct as provided in the prompt)
 def load_questions(file_path):
     """Load questions from a JSONL file."""
     questions = []
@@ -130,57 +148,107 @@ def cleanup_permanent_errors(output_file):
     print(f"\n--- Cleaning up permanent errors in: {output_file} ---")
     print("--- Keeping ONLY successful responses. ---")
     try:
+        # Use NamedTemporaryFile correctly within a 'with' statement
         with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=False, dir=output_file.parent, suffix='.tmp') as temp_f:
-            temp_file_path = Path(temp_f.name)
+            temp_file_path = Path(temp_f.name) # Get the path
             with open(output_file, 'r', encoding='utf-8') as original_f:
                 for i, line in enumerate(original_f):
                     lines_read = i + 1
                     stripped_line = line.strip()
 
                     if not stripped_line:
-                        continue
+                        continue # Skip empty lines
+
                     keep_line = False
                     try:
                         entry = json.loads(stripped_line)
-                        response_data, question_id = entry.get("response"), entry.get("question_id")
-                        is_api_error, is_empty = is_permanent_api_error(response_data), is_empty_content_response(response_data)
+                        # Check for required fields before processing
+                        response_data = entry.get("response")
+                        question_id = entry.get("question_id")
+
                         if not question_id:
                             corrupted_skipped += 1
-                            print(f"Warning: Line {lines_read} missing ID during cleanup, skipping.")
-                        elif is_api_error:
+                            print(f"Warning: Line {lines_read} missing 'question_id' during cleanup, skipping.")
+                            continue # Skip this line
+
+                        if response_data is None: # Handle case where 'response' key is missing
+                            corrupted_skipped +=1
+                            print(f"Warning: Line {lines_read} (QID: {question_id}) missing 'response' data during cleanup, skipping.")
+                            continue # Skip this line
+
+                        # Now check the content of the response
+                        is_api_error = is_permanent_api_error(response_data)
+                        is_empty = is_empty_content_response(response_data)
+
+                        if is_api_error:
                             api_errors_skipped += 1
                         elif is_empty:
                             empty_skipped += 1
                         else:
-                            keep_line = True
+                             # Add a check for basic success structure before keeping
+                             if (isinstance(response_data, dict) and
+                                 "choices" in response_data and
+                                 isinstance(response_data["choices"], list) and
+                                 len(response_data["choices"]) > 0 and
+                                 isinstance(response_data["choices"][0].get("message"), dict) and
+                                 response_data["choices"][0]["message"].get("content") is not None): # Allow non-empty content
+                                 keep_line = True
+                             else:
+                                 # Treat responses that aren't errors/empty but lack valid content as corrupted/unusable
+                                 corrupted_skipped += 1
+                                 # print(f"Warning: Line {lines_read} (QID: {question_id}) lacks valid content structure, skipping.")
+
+
                         if keep_line:
-                            temp_f.write(line)
+                            temp_f.write(line) # Write the original line
                             lines_written += 1
+
                     except (json.JSONDecodeError):
                         corrupted_skipped += 1
-                        print(f"Warning: Corrupted line {lines_read} encountered during cleanup, skipping.")
+                        print(f"Warning: Corrupted line {lines_read} encountered during cleanup (JSONDecodeError), skipping.")
+                    except Exception as e_inner: # Catch other potential errors processing a line
+                         corrupted_skipped += 1
+                         print(f"Warning: Error processing line {lines_read} during cleanup: {type(e_inner).__name__}. Skipping.")
+
+
+        # --- Post-processing and replacement ---
         if lines_read > 0:
              print(f"\nCleanup processed {lines_read} lines.")
              print(f"  - Kept {lines_written} successful responses.")
              print(f"  - Skipped {api_errors_skipped} permanent API errors.")
              print(f"  - Skipped {empty_skipped} empty content responses.")
-             print(f"  - Skipped {corrupted_skipped} corrupted/unparseable lines.")
-             print(f"Attempting to atomically replace original file...")
-             os.replace(temp_file_path, output_file)
-             print(f"Successfully replaced {output_file}.")
-             temp_file_path = None
-             print("--- Cleanup Finished Successfully ---")
-             return True
-        else:
-             print("Original file was empty. No cleanup performed.")
-             if temp_file_path and temp_file_path.exists():
-                 temp_file_path.unlink()
-             return False
+             print(f"  - Skipped {corrupted_skipped} corrupted/unparseable/invalid structure lines.")
+
+             if lines_written > 0 or api_errors_skipped > 0 or empty_skipped > 0 or corrupted_skipped > 0 : # Only replace if changes were made or file non-empty
+                 print(f"Attempting to atomically replace original file...")
+                 try:
+                     # Ensure temp file is closed before replacing (it is by end of 'with')
+                     os.replace(temp_file_path, output_file)
+                     print(f"Successfully replaced {output_file}.")
+                     temp_file_path = None # Avoid deletion in finally block
+                     print("--- Cleanup Finished Successfully ---")
+                     return True
+                 except OSError as e_replace:
+                      print(f"!!! ERROR replacing file {output_file} with {temp_file_path}: {e_replace} !!!")
+                      return False # Indicate failure
+             else:
+                 print("No valid lines kept and no errors/empty found to remove. Original file likely empty or contained only corrupted lines.")
+                 # No need to replace if nothing changed
+                 print("--- Cleanup Finished (No Changes Made) ---")
+                 return True
+
+
+        else: # Original file was empty or only had blank lines
+             print("Original file was empty or contained no processable lines. No cleanup performed.")
+             # No need to replace
+             return True # Not an error state
+
     except Exception as e:
         print(f"!!! ERROR during cleanup process: {type(e).__name__}: {e} !!!")
         traceback.print_exc()
         return False
     finally:
+        # Clean up temp file if replacement failed or wasn't attempted
         if temp_file_path and temp_file_path.exists():
             print(f"Cleaning up temporary file: {temp_file_path}")
             try:
@@ -188,126 +256,265 @@ def cleanup_permanent_errors(output_file):
             except OSError as unlink_e:
                 print(f"Warning: Could not delete temporary file {temp_file_path}: {unlink_e}")
 
+
 # --- API Interaction ---
-def retry_with_backoff(func, max_retries=8, initial_delay=1):
+
+def get_openai_models(api_key):
+    """Fetches the list of available models from the OpenAI API."""
+    global OPENAI_MODELS_CACHE, OPENAI_MODELS_CHECK_DONE
+    # Use lock to prevent multiple threads trying to fetch simultaneously
+    with OPENAI_MODELS_LOCK:
+        if OPENAI_MODELS_CHECK_DONE:
+            return OPENAI_MODELS_CACHE
+
+        print("Fetching available models from OpenAI API...")
+        headers = {"Authorization": f"Bearer {api_key}"}
+        try:
+            response = requests.get(f"{OPENAI_API_BASE}/models", headers=headers, timeout=30)
+            response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+            models_data = response.json()
+            # OpenAI format is a list under the 'data' key, each item has an 'id'
+            model_ids = {model['id'] for model in models_data.get('data', []) if 'id' in model}
+            print(f"Found {len(model_ids)} models available via OpenAI API.")
+            OPENAI_MODELS_CACHE = model_ids
+            OPENAI_MODELS_CHECK_DONE = True
+            return OPENAI_MODELS_CACHE
+        except RequestException as e:
+            print(f"Error fetching OpenAI models: {e}")
+            print("Could not verify OpenAI models. Will fall back to OpenRouter for 'openai/' prefixed models.")
+            OPENAI_MODELS_CACHE = set() # Indicate check failed, cache empty set
+            OPENAI_MODELS_CHECK_DONE = True
+            return OPENAI_MODELS_CACHE
+        except Exception as e:
+            print(f"Unexpected error fetching OpenAI models: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            OPENAI_MODELS_CACHE = set() # Indicate check failed
+            OPENAI_MODELS_CHECK_DONE = True
+            return OPENAI_MODELS_CACHE
+
+
+def retry_with_backoff(func, api_provider_name, max_retries=8, initial_delay=1):
     """Retry a function with exponential backoff for transient errors."""
     retries = 0
     last_exception = None
     while retries < max_retries:
         try:
             result = func()
-            return result
+            # Check for non-200 responses that indicate permanent client errors
+            # This logic might need slight adjustment based on specific API's permanent error codes
+            if isinstance(result, dict):
+                 status_code = result.get("status_code") # Check if make_request added this
+                 if status_code and status_code >= 400 and status_code not in [429, 500, 502, 503, 504]: # Add more retryable codes if needed
+                    # Check for specific OpenAI 'invalid_request_error' which shouldn't be retried
+                    error_info = result.get("error", {})
+                    if isinstance(error_info, dict) and error_info.get("type") == "invalid_request_error":
+                         print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Permanent client error (invalid_request_error). Not retrying.")
+                         # Return the error structure directly
+                         return {"error": error_info}
+
+                    # Generic non-retryable client error
+                    print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Non-retryable client error ({status_code}). Treating as permanent failure.")
+                    # Return the error structure directly from make_request
+                    return {"error": result.get("error_detail", f"Permanent Client Error {status_code}")}
+
+            # If it's not a dict with a permanent error code, assume success or retryable
+            return result # Return successful response or result triggering exception below
+
+        # Catch exceptions that indicate a *potentially* transient issue
         except (RequestException, ValueError, json.JSONDecodeError, KeyError) as e:
             last_exception = e
             retries += 1
+            error_type_name = type(last_exception).__name__
+
             if retries == max_retries:
-                # Log clearly when giving up due to transient errors
-                print(f"\n[Thread-{threading.get_ident()}] Max retries ({max_retries}) reached. Final transient error: {type(last_exception).__name__}: {str(last_exception)}.")
+                print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Max retries ({max_retries}) reached. Final transient error: {error_type_name}: {str(last_exception)}.")
                 return TRANSIENT_FAILURE_MARKER
-            base_delay = initial_delay * (2 ** (retries -1))
+
+            # Decide if the caught exception is truly retryable
+            # RequestException (network, timeout, 5xx, 429 handled inside make_request) are retryable.
+            # ValueError (e.g., JSON decode on 200 OK) is potentially transient.
+            # JSONDecodeError is potentially transient.
+            # KeyError might indicate unexpected API response format change - might be transient or permanent, retry cautiously.
+            print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Attempt {retries}/{max_retries} failed ({error_type_name}). Retrying...")
+
+            base_delay = initial_delay * (2 ** (retries - 1))
             jitter = base_delay * 0.1
-            actual_delay = min(base_delay + random.uniform(-jitter, jitter), 60)
-            actual_delay = max(actual_delay, 0)
+            # Cap max delay, ensure non-negative
+            actual_delay = max(0, min(base_delay + random.uniform(-jitter, jitter), 60))
             time.sleep(actual_delay)
-    print(f"\n[Thread-{threading.get_ident()}] Exited retry loop unexpectedly.") # Should not happen
+
+    # Should not be reached if max_retries > 0
+    print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Exited retry loop unexpectedly.")
     return TRANSIENT_FAILURE_MARKER
 
-def ask_question(question, model, api_key):
-    """Send a question to the API endpoint. Handles retries internally."""
-    if model.startswith("accounts/fireworks"):
-        url = "https://api.fireworks.ai/inference/v1/chat/completions"
-        api_type = "Fireworks"
-    else:
-        url = "https://openrouter.ai/api/v1/chat/completions"
-        api_type = "OpenRouter"
+
+def ask_question(question, model_id, api_target, api_key):
+    """Send a question to the specified API endpoint. Handles retries internally."""
+    url = ""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    if api_type == "OpenRouter":
-         headers["HTTP-Referer"] = os.getenv("OPENROUTER_REFERRER", "http://localhost")
-         headers["X-Title"] = os.getenv("OPENROUTER_TITLE", "AI Question Answering Script")
-    data = {"model": model, "messages": [ {"role": "user", "content": question} ]}
+    data = {"messages": [{"role": "user", "content": question}]}
+    api_provider_name = "Unknown" # For logging
+
+    # --- Configure API details based on target ---
+    if api_target == "openai":
+        api_provider_name = "OpenAI"
+        # OpenAI expects model ID without prefix
+        model_name_for_api = model_id.split('/')[-1] if '/' in model_id else model_id
+        url = f"{OPENAI_API_BASE}/chat/completions"
+        data["model"] = model_name_for_api
+        # No extra headers needed for OpenAI typically
+
+    elif api_target == "openrouter":
+        api_provider_name = "OpenRouter"
+        url = f"{OPENROUTER_API_BASE}/chat/completions"
+        data["model"] = model_id # OpenRouter expects the full model ID
+        headers["HTTP-Referer"] = os.getenv("OPENROUTER_REFERRER", "http://localhost")
+        headers["X-Title"] = os.getenv("OPENROUTER_TITLE", "AI Question Answering Script")
+
+    elif api_target == "fireworks":
+        api_provider_name = "FireworksAI"
+        url = f"{FIREWORKS_API_BASE}/chat/completions"
+        data["model"] = model_id # Fireworks uses full model ID
+        # No extra headers needed for Fireworks typically
+
+    else:
+        # Should not happen if main logic is correct
+        print(f"ERROR: Unknown api_target '{api_target}' in ask_question.")
+        return {"error": {"message": f"Internal configuration error: Unknown API target '{api_target}'", "code": "config_error"}}
+
+    # --- Define the request function for retry logic ---
     def make_request():
-        response = requests.post(url=url, headers=headers, data=json.dumps(data), timeout=120)
+        response = requests.post(url=url, headers=headers, data=json.dumps(data), timeout=180) # Increased timeout
+
+        # --- Handle non-200 responses ---
         if response.status_code != 200:
-             error_details = f"Status Code: {response.status_code}"
-             try:
-                 resp_json = response.json()
-                 error_msg = resp_json.get('error', {}).get('message', str(resp_json))
-                 error_details += f", Body: {error_msg}"
-             except json.JSONDecodeError:
-                 error_details += f", Body: {response.text[:500]}"
-             if response.status_code >= 500 or response.status_code == 429:
-                 raise RequestException(f"Retryable server/rate limit error: {error_details}")
-             else:
-                 # Print non-retryable client errors clearly
-                 print(f"\n[Thread-{threading.get_ident()}] Client error: {error_details}. Treating as permanent failure.")
-                 try:
-                     return response.json()
-                 except json.JSONDecodeError:
-                     return {"error": {"message": f"Permanent Client Error: {error_details}", "code": response.status_code}}
+            status_code = response.status_code
+            error_details = f"Status Code: {status_code}"
+            error_json = None # Store potential error JSON from response body
+            try:
+                resp_json = response.json()
+                error_json = resp_json.get('error') # Standard location for OpenAI/OR
+                error_msg = ""
+                if isinstance(error_json, dict):
+                     error_msg = error_json.get('message', str(error_json))
+                elif isinstance(error_json, str):
+                     error_msg = error_json
+                else: # Fallback if error format is unexpected
+                     error_msg = str(resp_json)
+
+                error_details += f", Body: {error_msg}"
+            except json.JSONDecodeError:
+                error_details += f", Body (non-JSON): {response.text[:500]}"
+            except Exception: # Catch other potential issues parsing error
+                 error_details += f", Body (error parsing): {response.text[:500]}"
+
+
+            # --- Classify error for retry/failure ---
+            # Retryable server errors and rate limiting
+            if status_code >= 500 or status_code == 429:
+                # Raise exception for retry_with_backoff to catch
+                raise RequestException(f"Retryable {api_provider_name} server/rate limit error: {error_details}")
+            # Specific non-retryable client errors (e.g., OpenAI invalid request)
+            elif api_target == "openai" and isinstance(error_json, dict) and error_json.get("type") == "invalid_request_error":
+                 # Return dict for retry_with_backoff to identify as permanent
+                 return {"status_code": status_code, "error": error_json, "error_detail": error_details}
+            # Other client errors (4xx except 429) - treat as permanent
+            else:
+                 print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API Client error: {error_details}. Treating as permanent failure.")
+                 # Return dict for retry_with_backoff to identify as permanent
+                 # Try to return the structured error if possible
+                 error_payload = error_json if error_json else {"message": f"Permanent Client Error: {error_details}", "code": status_code}
+                 return {"status_code": status_code, "error": error_payload, "error_detail": error_details}
+
+
+        # --- Handle successful 200 OK response ---
         try:
             response_data = response.json()
+            # Basic validation of success response structure
+            if not isinstance(response_data, dict):
+                raise ValueError(f"Unexpected {api_provider_name} response format (not dict): {type(response_data)}")
+            # Deeper validation could be added here if needed (e.g., check for 'choices')
+            # Add the provider info to the response for logging consistency
+            response_data["_api_provider_used"] = api_provider_name
+            return response_data
         except json.JSONDecodeError as e:
-            raise ValueError(f"Failed to decode JSON on 200 OK: {e}. Response: {response.text[:500]}")
-        if not isinstance(response_data, dict):
-            raise ValueError(f"Unexpected response format (not dict): {type(response_data)}")
-        # Don't log success/empty/perm error detection here, let caller handle
-        return response_data
-    return retry_with_backoff(make_request) # Calls the retry logic
+            # Treat JSON decode error on 200 OK as potentially transient
+            raise ValueError(f"Failed to decode {api_provider_name} JSON on 200 OK: {e}. Response: {response.text[:500]}")
+        except Exception as e:
+             # Catch other unexpected errors processing successful response
+             raise ValueError(f"Error processing successful {api_provider_name} response: {type(e).__name__}: {e}")
+
+
+    # --- Execute with retry logic ---
+    return retry_with_backoff(make_request, api_provider_name)
 
 # --- Worker Function ---
-def process_single_question_worker(question_data, model, api_key):
-    """Worker function to process a single question."""
-    response = ask_question(question_data.get('question', '[Missing Question]'), model, api_key)
-    return question_data, response
+def process_single_question_worker(question_data, model_id, api_target, api_key):
+    """Worker function to process a single question using the determined API target."""
+    # Add api_target and api_key parameters
+    response = ask_question(
+        question_data.get('question', '[Missing Question]'),
+        model_id, # Pass the original model ID requested
+        api_target, # Pass the determined API target
+        api_key     # Pass the corresponding API key
+        )
+    return question_data, response, api_target # Return api_target used
 
 # --- Main Processing Logic ---
-def process_questions(questions_file, model, api_key, num_workers, force_restart=False, force_retry_permanent=False):
+def process_questions(questions_file, model_id, api_target, api_key, num_workers, force_restart=False, force_retry_permanent=False):
     """Process questions in parallel, save responses, handle resumes and cleanup."""
+    # Added api_target and api_key parameters
     global PROGRESS_COUNTER # Use global counter
     PROGRESS_COUNTER = 0 # Reset counter for each file
 
     output_dir = Path("responses")
     output_dir.mkdir(exist_ok=True)
     questions_filename = Path(questions_file).stem
-    safe_model_name = model.replace('/', '_')
+    # Use a safe version of the *original* model ID for the filename
+    safe_model_name = model_id.replace('/', '_').replace(':', '-') # Replace common invalid chars
     output_file = output_dir / f"{questions_filename}_{safe_model_name}.jsonl"
 
     questions, loaded_ok = load_questions(questions_file)
     if not loaded_ok:
-        return
+        return # Error message printed in load_questions
     total_questions = len(questions)
-    print(f"Loaded {total_questions} questions from {questions_file}")
+    # print(f"Loaded {total_questions} questions from {questions_file}") # Printed in load_questions
 
+    # --- Resume / Restart Logic ---
     if force_retry_permanent:
         print("\n--force-retry-permanent-errors flag detected.")
         if output_file.exists():
             cleanup_successful = cleanup_permanent_errors(output_file)
             if not cleanup_successful:
-                print("ERROR: Cleanup failed. Exiting.")
-                return
+                print("ERROR: Cleanup failed. Cannot proceed with retrying permanent errors.")
+                # Depending on desired behavior, you might exit or just continue without retries
+                return # Exit this file processing
             print("Permanent error cleanup finished.")
         else:
             print("Output file does not exist, no permanent errors to clean.")
-    processed_ids = load_existing_responses(output_file)
-    if not force_retry_permanent:
-        if output_file.exists():
-            print(f"Resuming. {len(processed_ids)} completed entries found.")
-        else:
-            print(f"No existing output file found at '{output_file}'. Starting fresh.")
-    if force_restart and not force_retry_permanent:
-        print(f"Force restart requested. Removing existing output file '{output_file}'.")
-        if output_file.exists():
-            try:
-                output_file.unlink()
-                processed_ids = set()
-                print("Existing file removed.")
-            except OSError as e:
-                print(f"Error removing file {output_file}: {e}. Exiting.")
-                return
-        else:
-            print("Force restart requested, but no file existed.")
-            processed_ids = set()
 
+    processed_ids = set() # Reset processed IDs after potential cleanup
+    if output_file.exists():
+         if not force_restart:
+              processed_ids = load_existing_responses(output_file)
+              print(f"Resuming. Found {len(processed_ids)} completed entries in '{output_file}'.")
+         elif force_retry_permanent: # If FRPE was used, load IDs *after* cleanup
+              processed_ids = load_existing_responses(output_file)
+              print(f"Found {len(processed_ids)} entries remaining after permanent error cleanup in '{output_file}'.")
+         else: # force_restart is True and not force_retry_permanent
+             print(f"Force restart requested. Removing existing output file '{output_file}'.")
+             try:
+                 output_file.unlink()
+                 processed_ids = set() # Start fresh
+                 print("Existing file removed.")
+             except OSError as e:
+                 print(f"Error removing file {output_file}: {e}. Exiting file processing.")
+                 return
+    else:
+         print(f"No existing output file found at '{output_file}'. Starting fresh.")
+
+
+    # --- Filter Questions ---
     questions_to_process = []
     for q_data in questions:
         q_id = q_data.get('id')
@@ -319,60 +526,78 @@ def process_questions(questions_file, model, api_key, num_workers, force_restart
 
     num_to_process = len(questions_to_process)
     num_skipped = total_questions - num_to_process
-    print(f"\nTotal questions: {total_questions}")
-    print(f"Already processed: {num_skipped}")
+    print(f"\nTotal questions in file: {total_questions}")
+    print(f"Already processed (or skipped in prior runs): {num_skipped}")
     print(f"Questions to process this run: {num_to_process}")
     if num_to_process == 0:
-        print("No questions remaining to process.")
+        print("No questions remaining to process for this file.")
         return
 
-    print(f"\nProcessing {num_to_process} questions using {num_workers} workers...")
+    # --- Start Processing ---
+    print(f"\nProcessing {num_to_process} questions for model '{model_id}' using API target '{api_target.upper()}' with {num_workers} workers...")
     print(f"Saving ALL responses (Successes and Permanent Errors) to: {output_file}")
     output_lock = threading.Lock()
-    questions_processed_this_run, questions_logged_this_run, questions_failed_transiently_this_run = 0, 0, 0
+    questions_processed_this_run = 0
+    questions_logged_this_run = 0
+    questions_failed_transiently_this_run = 0
     start_time = time.time()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = [executor.submit(process_single_question_worker, q_data, model, api_key)
+        # Submit tasks with the determined api_target and api_key
+        futures = [executor.submit(process_single_question_worker, q_data, model_id, api_target, api_key)
                    for q_data in questions_to_process]
 
         for future in concurrent.futures.as_completed(futures):
             try:
-                question_data, response = future.result()
-                question_id = question_data.get('id')
+                # Get results from the worker
+                question_data, response, api_provider_used = future.result()
+                question_id = question_data.get('id', '[Missing ID]') # Get ID again safely
                 questions_processed_this_run += 1 # Count completed task
 
                 # --- Handle response ---
                 if response is TRANSIENT_FAILURE_MARKER:
                     questions_failed_transiently_this_run += 1
+                    print(f"  QID {question_id}: Transient failure using {api_provider_used}, will retry later.")
                 else:
+                    # Add provider info if ask_question didn't already (belt and suspenders)
+                    if isinstance(response, dict) and "_api_provider_used" not in response:
+                         response["_api_provider_used"] = api_provider_used
+
                     output_entry = {
                         "question_id": question_id,
                         "category": question_data.get('category'),
                         "question": question_data.get('question'),
-                        "model": model,
+                        "model": model_id, # Log the original model requested
+                        "api_provider": api_provider_used, # Log which API was actually used
                         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        "response": response
+                        "response": response # Contains the full API response (or error structure)
                     }
+                    # Add optional domain field if present in input
                     if 'domain' in question_data:
                         output_entry['domain'] = question_data['domain']
 
-                    # --- Determine log status ---
-                    log_status = "Unknown"
-                    if is_permanent_api_error(response):
-                        log_status = "PermError(API)"
-                    elif is_empty_content_response(response):
-                        log_status = "PermError(Empty)"
-                    elif isinstance(response, dict) and "choices" in response and len(response.get("choices",[])) > 0 and response["choices"][0].get("message",{}).get("content"):
-                        log_status = "Success"
-                    else:
-                        log_status = "PermError(Other)"
+                    # --- Determine log status (for console, not strictly needed for file) ---
+                    # log_status = "Unknown"
+                    # if is_permanent_api_error(response):
+                    #     log_status = f"PermError({api_provider_used})"
+                    # elif is_empty_content_response(response):
+                    #     log_status = "PermError(Empty)"
+                    # elif isinstance(response, dict) and "choices" in response and len(response.get("choices",[])) > 0:
+                    #     # Simplified success check
+                    #     log_status = "Success"
+                    # else:
+                    #      # Any other structure that isn't a TRANSIENT_FAILURE is treated as logged (likely perm error)
+                    #      log_status = f"PermError(Other/{api_provider_used})"
+                    # print(f"  QID {question_id}: Status - {log_status}") # Optional: print status
+
 
                     # --- Thread-safe writing to output file ---
                     try:
-                        with output_lock: # Keep the lock for explicit safety
+                        with output_lock:
                             with open(output_file, 'a', encoding='utf-8') as f:
                                 f.write(json.dumps(output_entry, ensure_ascii=False) + '\n')
+                            # Add ID to set *only* after successful write
+                            processed_ids.add(question_id)
                         questions_logged_this_run += 1
 
                         # --- Simple Progress Indicator ---
@@ -382,26 +607,39 @@ def process_questions(questions_file, model, api_key, num_workers, force_restart
                              if PROGRESS_COUNTER % 10 == 0 or PROGRESS_COUNTER == num_to_process:
                                  elapsed = time.time() - start_time
                                  rate = PROGRESS_COUNTER / elapsed if elapsed > 0 else 0
-                                 print(f"  Progress: {PROGRESS_COUNTER}/{num_to_process} ({PROGRESS_COUNTER/num_to_process:.1%}) completed. Rate: {rate:.2f} Q/s.")
+                                 percent_done = (PROGRESS_COUNTER / num_to_process) * 100
+                                 print(f"  Progress: {PROGRESS_COUNTER}/{num_to_process} ({percent_done:.1f}%) completed. Rate: {rate:.2f} Q/s.")
 
-                    except Exception as e:
-                         print(f"\nCRITICAL ERROR writing entry for Q ID {question_id}: {e}")
+                    except Exception as write_e:
+                         # Handle potential write errors critically
+                         print(f"\nCRITICAL ERROR writing entry for Q ID {question_id}: {write_e}")
+                         traceback.print_exc()
+                         # Decide if this should stop processing? For now, continue.
 
-            except Exception as e:
-                 print(f"\nCRITICAL ERROR processing future result: {type(e).__name__}: {e}")
+            except Exception as future_e:
+                 # Handle errors retrieving result from future (e.g., worker raised unexpected exception)
+                 print(f"\nCRITICAL ERROR processing future result: {type(future_e).__name__}: {future_e}")
                  traceback.print_exc()
+                 # We don't know which question ID this was for easily without more complex tracking
+                 # Consider this a failure, but maybe don't increment transient count
 
     # --- Final Summary ---
     end_time = time.time()
     duration = end_time - start_time
     print("-" * 30)
     print(f"Finished processing {questions_file}.")
+    print(f"  Model requested: {model_id}")
+    print(f"  API Target used: {api_target.upper()}")
     print(f"  Total questions in file: {total_questions}")
     print(f"  Tasks submitted this run: {num_to_process}")
     print(f"  Tasks completed by workers: {questions_processed_this_run}")
     print(f"  Responses logged this run (Success/PermError): {questions_logged_this_run}")
     print(f"  Tasks failed transiently this run (will retry): {questions_failed_transiently_this_run}")
+    # Calculate permanent failures more accurately
+    permanent_failures_this_run = questions_processed_this_run - questions_logged_this_run - questions_failed_transiently_this_run
+    print(f"  Tasks failed permanently this run (or worker error): {permanent_failures_this_run}")
     print(f"  Processing duration: {duration:.2f} seconds")
+    # Recalculate final count from file for accuracy
     final_processed_ids = load_existing_responses(output_file)
     print(f"  Total logged entries in file now: {len(final_processed_ids)} / {total_questions}")
     print(f"  Output file: {output_file}")
@@ -410,36 +648,81 @@ def process_questions(questions_file, model, api_key, num_workers, force_restart
 # --- Main Execution ---
 def main():
     parser = argparse.ArgumentParser(
-        description='Ask questions via API in parallel, with retries for transient errors. Logs successes and permanent errors.',
+        description='Ask questions via API in parallel, supporting OpenAI, OpenRouter, and FireworksAI, with retries for transient errors. Logs successes and permanent errors.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('model', help='Model identifier (e.g., "openai/gpt-4o")')
+    parser.add_argument('model', help='Model identifier (e.g., "openai/gpt-4o", "google/gemini-1.5-flash", "accounts/fireworks/models/llama-v3p1-405b-instruct")')
     parser.add_argument('questions_files', nargs='+', help='One or more JSONL question files (must contain "id" and "question" fields).')
-    parser.add_argument('-w', '--workers', type=int, default=1, help='Number of parallel worker threads for API requests.')
+    parser.add_argument('-w', '--workers', type=int, default=4, help='Number of parallel worker threads for API requests.') # Sensible default > 1
     parser.add_argument('--force-restart', action='store_true', help='Delete existing output file and start fresh (overrides --force-retry-permanent-errors).')
     parser.add_argument('--force-retry-permanent-errors', '--frpe', action='store_true', help='Remove logged permanent errors from the output file before starting, forcing retry.')
     args = parser.parse_args()
 
     if args.workers < 1:
         print("Error: Number of workers must be at least 1.")
-        exit(1)
+        sys.exit(1)
     if args.force_restart and args.force_retry_permanent_errors:
         print("Warning: --force-restart overrides --force-retry-permanent-errors. Proceeding with full restart.")
-        args.force_retry_permanent_errors = False
+        args.force_retry_permanent_errors = False # Disable FRPE if full restart is chosen
 
-    is_fireworks = args.model.startswith('accounts/fireworks')
-    env_var = 'FIREWORKS_API_KEY' if is_fireworks else 'OPENROUTER_API_KEY'
-    api_key = os.getenv(env_var)
+    # --- Determine API Target and Key ---
+    model_id = args.model
+    api_target = "" # Will be 'openai', 'openrouter', or 'fireworks'
+    api_key = None
+    env_var_used = ""
+
+    # 1. Check for OpenAI prefix
+    if model_id.startswith('openai/'):
+        print(f"Model '{model_id}' starts with 'openai/'. Checking availability...")
+        openai_key = os.getenv('OPENAI_API_KEY')
+        if not openai_key:
+            print("Warning: OPENAI_API_KEY environment variable not set.")
+            print("Attempting fallback to OpenRouter for this model...")
+            api_target = "openrouter"
+            api_key = os.getenv('OPENROUTER_API_KEY')
+            env_var_used = 'OPENROUTER_API_KEY'
+        else:
+            available_openai_models = get_openai_models(openai_key)
+            # OpenAI API uses model ID *without* the prefix
+            openai_model_name_only = model_id.split('/')[-1]
+            if openai_model_name_only in available_openai_models:
+                print(f"Model '{openai_model_name_only}' found in OpenAI API. Using OpenAI.")
+                api_target = "openai"
+                api_key = openai_key
+                env_var_used = 'OPENAI_API_KEY'
+            else:
+                print(f"Model '{openai_model_name_only}' not found in available OpenAI models.")
+                print("Attempting fallback to OpenRouter...")
+                api_target = "openrouter"
+                api_key = os.getenv('OPENROUTER_API_KEY')
+                env_var_used = 'OPENROUTER_API_KEY'
+
+    # 2. Check for Fireworks prefix
+    elif model_id.startswith('accounts/fireworks/'):
+        print(f"Model '{model_id}' identified as FireworksAI model.")
+        api_target = "fireworks"
+        api_key = os.getenv('FIREWORKS_API_KEY')
+        env_var_used = 'FIREWORKS_API_KEY'
+
+    # 3. Default to OpenRouter
+    else:
+        print(f"Model '{model_id}' not recognized as OpenAI or FireworksAI. Assuming OpenRouter.")
+        api_target = "openrouter"
+        api_key = os.getenv('OPENROUTER_API_KEY')
+        env_var_used = 'OPENROUTER_API_KEY'
+
+    # --- Validate API Key ---
     if not api_key:
-        model_type = "Fireworks" if is_fireworks else "OpenRouter/Compatible"
-        print(f"Error: {env_var} environment variable must be set for {model_type} models.")
-        exit(1)
+        print(f"Error: Required API key environment variable '{env_var_used}' is not set for the determined API target '{api_target.upper()}'.")
+        sys.exit(1)
 
-    print(f"Using API Key from env var: {env_var}")
-    if not is_fireworks:
+    print(f"Using API Target: {api_target.upper()}")
+    print(f"Using API Key from env var: {env_var_used}")
+    if api_target == "openrouter":
         print(f"OpenRouter Referrer: {os.getenv('OPENROUTER_REFERRER', 'http://localhost')}")
         print(f"OpenRouter Title: {os.getenv('OPENROUTER_TITLE', 'AI Question Answering Script')}")
     print(f"Using {args.workers} parallel worker(s).")
 
+    # --- Process Files ---
     total_start_time = time.time()
     files_processed_count, files_failed_count = 0, 0
     for questions_file in args.questions_files:
@@ -450,25 +733,43 @@ def main():
             files_failed_count += 1
             continue
         try:
-            process_questions(questions_file, args.model, api_key, args.workers, args.force_restart, args.force_retry_permanent_errors)
+            # Pass the determined api_target and api_key
+            process_questions(
+                questions_file,
+                model_id,
+                api_target,
+                api_key,
+                args.workers,
+                args.force_restart,
+                args.force_retry_permanent_errors
+                )
             files_processed_count += 1
+        except KeyboardInterrupt:
+             print("\nInterrupted by user. Stopping.")
+             files_failed_count += 1 # Count current file as failed/incomplete
+             break # Exit loop over files
         except Exception as e:
             files_failed_count += 1
             print(f"\n!!! CRITICAL UNEXPECTED ERROR processing {questions_file} !!!")
             print(f"Error: {type(e).__name__}: {str(e)}")
             traceback.print_exc()
-            print("Attempting to continue...")
+            print("Attempting to continue with next file...")
         file_end_time = time.time()
         print(f"=== Finished processing file: {questions_file} (Duration: {file_end_time - file_start_time:.2f} seconds) ===")
 
+    # --- Overall Summary ---
     total_end_time = time.time()
     print("\n" + "="*40)
     print("Overall Summary:")
+    print(f"  Model processed: {model_id} (API: {api_target.upper()})")
     print(f"  Total files attempted: {len(args.questions_files)}")
     print(f"  Files processed successfully: {files_processed_count}")
-    print(f"  Files failed/skipped: {files_failed_count}")
+    print(f"  Files failed/skipped/interrupted: {files_failed_count}")
     print(f"  Total execution time: {total_end_time - total_start_time:.2f} seconds")
     print("="*40)
+
+    if files_failed_count > 0:
+        sys.exit(1) # Exit with error status if any files failed
 
 if __name__ == "__main__":
     main()
