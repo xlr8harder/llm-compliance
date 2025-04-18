@@ -18,6 +18,7 @@ TRANSIENT_FAILURE_MARKER = object() # Use a unique object marker
 # Add a counter for overall progress reporting
 PROGRESS_COUNTER = 0
 PROGRESS_LOCK = threading.Lock()
+VALID_PROVIDERS = ["openai", "openrouter", "fireworks"] # Define valid provider names
 
 # --- Global Cache for OpenAI Models ---
 OPENAI_MODELS_CACHE = None
@@ -281,7 +282,7 @@ def get_openai_models(api_key):
             return OPENAI_MODELS_CACHE
         except RequestException as e:
             print(f"Error fetching OpenAI models: {e}")
-            print("Could not verify OpenAI models. Will fall back to OpenRouter for 'openai/' prefixed models.")
+            print("Could not verify OpenAI models. Will fall back to OpenRouter for 'openai/' prefixed models if not forced.")
             OPENAI_MODELS_CACHE = set() # Indicate check failed, cache empty set
             OPENAI_MODELS_CHECK_DONE = True
             return OPENAI_MODELS_CACHE
@@ -354,6 +355,7 @@ def ask_question(question, model_id, api_target, api_key):
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     data = {"messages": [{"role": "user", "content": question}]}
     api_provider_name = "Unknown" # For logging
+    model_name_for_api = model_id # Default to using the full model ID
 
     # --- Configure API details based on target ---
     if api_target == "openai":
@@ -368,6 +370,7 @@ def ask_question(question, model_id, api_target, api_key):
         api_provider_name = "OpenRouter"
         url = f"{OPENROUTER_API_BASE}/chat/completions"
         data["model"] = model_id # OpenRouter expects the full model ID
+        model_name_for_api = model_id # Keep for logging consistency later
         headers["HTTP-Referer"] = os.getenv("OPENROUTER_REFERRER", "http://localhost")
         headers["X-Title"] = os.getenv("OPENROUTER_TITLE", "AI Question Answering Script")
 
@@ -375,6 +378,7 @@ def ask_question(question, model_id, api_target, api_key):
         api_provider_name = "FireworksAI"
         url = f"{FIREWORKS_API_BASE}/chat/completions"
         data["model"] = model_id # Fireworks uses full model ID
+        model_name_for_api = model_id # Keep for logging consistency later
         # No extra headers needed for Fireworks typically
 
     else:
@@ -434,8 +438,9 @@ def ask_question(question, model_id, api_target, api_key):
             if not isinstance(response_data, dict):
                 raise ValueError(f"Unexpected {api_provider_name} response format (not dict): {type(response_data)}")
             # Deeper validation could be added here if needed (e.g., check for 'choices')
-            # Add the provider info to the response for logging consistency
-            response_data["_api_provider_used"] = api_provider_name
+            # Add the provider info and actual model used to the response for logging consistency
+            response_data["_provider_used"] = api_provider_name
+            response_data["_model_used_for_api"] = model_name_for_api
             return response_data
         except json.JSONDecodeError as e:
             # Treat JSON decode error on 200 OK as potentially transient
@@ -458,21 +463,23 @@ def process_single_question_worker(question_data, model_id, api_target, api_key)
         api_target, # Pass the determined API target
         api_key     # Pass the corresponding API key
         )
-    return question_data, response, api_target # Return api_target used
+    # Response now contains '_provider_used' and '_model_used_for_api' if successful
+    return question_data, response
 
 # --- Main Processing Logic ---
-def process_questions(questions_file, model_id, api_target, api_key, num_workers, force_restart=False, force_retry_permanent=False):
+def process_questions(questions_file, model_id, canonical_name, api_target, api_key, num_workers, force_restart=False, force_retry_permanent=False):
     """Process questions in parallel, save responses, handle resumes and cleanup."""
-    # Added api_target and api_key parameters
+    # Added canonical_name, api_target, api_key parameters
     global PROGRESS_COUNTER # Use global counter
     PROGRESS_COUNTER = 0 # Reset counter for each file
 
     output_dir = Path("responses")
     output_dir.mkdir(exist_ok=True)
     questions_filename = Path(questions_file).stem
-    # Use a safe version of the *original* model ID for the filename
-    safe_model_name = model_id.replace('/', '_').replace(':', '-') # Replace common invalid chars
-    output_file = output_dir / f"{questions_filename}_{safe_model_name}.jsonl"
+    # Use a safe version of the *canonical* or original model ID for the filename
+    output_model_name = canonical_name if canonical_name else model_id
+    safe_output_model_name = output_model_name.replace('/', '_').replace(':', '-') # Replace common invalid chars
+    output_file = output_dir / f"{questions_filename}_{safe_output_model_name}.jsonl"
 
     questions, loaded_ok = load_questions(questions_file)
     if not loaded_ok:
@@ -534,7 +541,8 @@ def process_questions(questions_file, model_id, api_target, api_key, num_workers
         return
 
     # --- Start Processing ---
-    print(f"\nProcessing {num_to_process} questions for model '{model_id}' using API target '{api_target.upper()}' with {num_workers} workers...")
+    model_name_to_log = canonical_name if canonical_name else model_id
+    print(f"\nProcessing {num_to_process} questions for model '{model_name_to_log}' using API target '{api_target.upper()}' with {num_workers} workers...")
     print(f"Saving ALL responses (Successes and Permanent Errors) to: {output_file}")
     output_lock = threading.Lock()
     questions_processed_this_run = 0
@@ -550,45 +558,38 @@ def process_questions(questions_file, model_id, api_target, api_key, num_workers
         for future in concurrent.futures.as_completed(futures):
             try:
                 # Get results from the worker
-                question_data, response, api_provider_used = future.result()
+                question_data, response = future.result() # Worker now returns only these two
                 question_id = question_data.get('id', '[Missing ID]') # Get ID again safely
                 questions_processed_this_run += 1 # Count completed task
+
+                # Extract provider and model info from response if available (added by ask_question on success)
+                # Provide defaults if the response was an error or marker
+                provider_used = response.get("_provider_used", api_target) if isinstance(response, dict) else api_target
+                model_used_for_api = response.get("_model_used_for_api", "[Unknown - Error]") if isinstance(response, dict) else "[Unknown - Error]"
+
+                # Clean up internal fields from the response object before logging
+                if isinstance(response, dict):
+                    response.pop("_provider_used", None)
+                    response.pop("_model_used_for_api", None)
 
                 # --- Handle response ---
                 if response is TRANSIENT_FAILURE_MARKER:
                     questions_failed_transiently_this_run += 1
-                    print(f"  QID {question_id}: Transient failure using {api_provider_used}, will retry later.")
+                    print(f"  QID {question_id}: Transient failure using {provider_used}, will retry later.")
                 else:
-                    # Add provider info if ask_question didn't already (belt and suspenders)
-                    if isinstance(response, dict) and "_api_provider_used" not in response:
-                         response["_api_provider_used"] = api_provider_used
-
                     output_entry = {
                         "question_id": question_id,
                         "category": question_data.get('category'),
                         "question": question_data.get('question'),
-                        "model": model_id, # Log the original model requested
-                        "api_provider": api_provider_used, # Log which API was actually used
+                        "model": model_name_to_log, # Log canonical name or original model_id
+                        "api_provider": provider_used, # Log which API was actually used
+                        "api_model": model_used_for_api, # Log model name sent to API
                         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                         "response": response # Contains the full API response (or error structure)
                     }
                     # Add optional domain field if present in input
                     if 'domain' in question_data:
                         output_entry['domain'] = question_data['domain']
-
-                    # --- Determine log status (for console, not strictly needed for file) ---
-                    # log_status = "Unknown"
-                    # if is_permanent_api_error(response):
-                    #     log_status = f"PermError({api_provider_used})"
-                    # elif is_empty_content_response(response):
-                    #     log_status = "PermError(Empty)"
-                    # elif isinstance(response, dict) and "choices" in response and len(response.get("choices",[])) > 0:
-                    #     # Simplified success check
-                    #     log_status = "Success"
-                    # else:
-                    #      # Any other structure that isn't a TRANSIENT_FAILURE is treated as logged (likely perm error)
-                    #      log_status = f"PermError(Other/{api_provider_used})"
-                    # print(f"  QID {question_id}: Status - {log_status}") # Optional: print status
 
 
                     # --- Thread-safe writing to output file ---
@@ -629,6 +630,8 @@ def process_questions(questions_file, model_id, api_target, api_key, num_workers
     print("-" * 30)
     print(f"Finished processing {questions_file}.")
     print(f"  Model requested: {model_id}")
+    if canonical_name:
+        print(f"  Canonical name used: {canonical_name}")
     print(f"  API Target used: {api_target.upper()}")
     print(f"  Total questions in file: {total_questions}")
     print(f"  Tasks submitted this run: {num_to_process}")
@@ -655,6 +658,8 @@ def main():
     parser.add_argument('-w', '--workers', type=int, default=4, help='Number of parallel worker threads for API requests.') # Sensible default > 1
     parser.add_argument('--force-restart', action='store_true', help='Delete existing output file and start fresh (overrides --force-retry-permanent-errors).')
     parser.add_argument('--force-retry-permanent-errors', '--frpe', action='store_true', help='Remove logged permanent errors from the output file before starting, forcing retry.')
+    parser.add_argument('--force_provider', choices=VALID_PROVIDERS, help='Force the use of a specific API provider (overrides automatic detection).')
+    parser.add_argument('--canonical-name', help='Canonical name for the model to be written in the output file.')
     args = parser.parse_args()
 
     if args.workers < 1:
@@ -669,58 +674,87 @@ def main():
     api_target = "" # Will be 'openai', 'openrouter', or 'fireworks'
     api_key = None
     env_var_used = ""
+    provider_forced = False
 
-    # 1. Check for OpenAI prefix
-    if model_id.startswith('openai/'):
-        print(f"Model '{model_id}' starts with 'openai/'. Checking availability...")
-        openai_key = os.getenv('OPENAI_API_KEY')
-        if not openai_key:
-            print("Warning: OPENAI_API_KEY environment variable not set.")
-            print("Attempting fallback to OpenRouter for this model...")
-            api_target = "openrouter"
+    # 1. Check for forced provider
+    if args.force_provider:
+        provider_forced = True
+        forced_provider = args.force_provider.lower()
+        print(f"Provider override specified: Forcing use of '{forced_provider.upper()}' API.")
+        api_target = forced_provider
+        if forced_provider == "openai":
+            api_key = os.getenv('OPENAI_API_KEY')
+            env_var_used = 'OPENAI_API_KEY'
+        elif forced_provider == "openrouter":
             api_key = os.getenv('OPENROUTER_API_KEY')
             env_var_used = 'OPENROUTER_API_KEY'
+        elif forced_provider == "fireworks":
+            api_key = os.getenv('FIREWORKS_API_KEY')
+            env_var_used = 'FIREWORKS_API_KEY'
         else:
-            available_openai_models = get_openai_models(openai_key)
-            # OpenAI API uses model ID *without* the prefix
-            openai_model_name_only = model_id.split('/')[-1]
-            if openai_model_name_only in available_openai_models:
-                print(f"Model '{openai_model_name_only}' found in OpenAI API. Using OpenAI.")
-                api_target = "openai"
-                api_key = openai_key
-                env_var_used = 'OPENAI_API_KEY'
-            else:
-                print(f"Model '{openai_model_name_only}' not found in available OpenAI models.")
-                print("Attempting fallback to OpenRouter...")
+            # This shouldn't happen due to argparse choices, but check anyway
+            print(f"Error: Invalid forced provider '{args.force_provider}'. Valid choices are: {VALID_PROVIDERS}")
+            sys.exit(1)
+
+    # 2. If provider not forced, determine automatically
+    if not provider_forced:
+        # Check for OpenAI prefix
+        if model_id.startswith('openai/'):
+            print(f"Model '{model_id}' starts with 'openai/'. Checking availability...")
+            openai_key = os.getenv('OPENAI_API_KEY')
+            if not openai_key:
+                print("Warning: OPENAI_API_KEY environment variable not set.")
+                print("Attempting fallback to OpenRouter for this model...")
                 api_target = "openrouter"
                 api_key = os.getenv('OPENROUTER_API_KEY')
                 env_var_used = 'OPENROUTER_API_KEY'
+            else:
+                available_openai_models = get_openai_models(openai_key)
+                # OpenAI API uses model ID *without* the prefix
+                openai_model_name_only = model_id.split('/')[-1]
+                if openai_model_name_only in available_openai_models:
+                    print(f"Model '{openai_model_name_only}' found in OpenAI API. Using OpenAI.")
+                    api_target = "openai"
+                    api_key = openai_key
+                    env_var_used = 'OPENAI_API_KEY'
+                else:
+                    print(f"Model '{openai_model_name_only}' not found in available OpenAI models.")
+                    print("Attempting fallback to OpenRouter...")
+                    api_target = "openrouter"
+                    api_key = os.getenv('OPENROUTER_API_KEY')
+                    env_var_used = 'OPENROUTER_API_KEY'
 
-    # 2. Check for Fireworks prefix
-    elif model_id.startswith('accounts/fireworks/'):
-        print(f"Model '{model_id}' identified as FireworksAI model.")
-        api_target = "fireworks"
-        api_key = os.getenv('FIREWORKS_API_KEY')
-        env_var_used = 'FIREWORKS_API_KEY'
+        # Check for Fireworks prefix
+        elif model_id.startswith('accounts/fireworks/'):
+            print(f"Model '{model_id}' identified as FireworksAI model.")
+            api_target = "fireworks"
+            api_key = os.getenv('FIREWORKS_API_KEY')
+            env_var_used = 'FIREWORKS_API_KEY'
 
-    # 3. Default to OpenRouter
-    else:
-        print(f"Model '{model_id}' not recognized as OpenAI or FireworksAI. Assuming OpenRouter.")
-        api_target = "openrouter"
-        api_key = os.getenv('OPENROUTER_API_KEY')
-        env_var_used = 'OPENROUTER_API_KEY'
+        # Default to OpenRouter
+        else:
+            print(f"Model '{model_id}' not recognized as OpenAI or FireworksAI. Assuming OpenRouter.")
+            api_target = "openrouter"
+            api_key = os.getenv('OPENROUTER_API_KEY')
+            env_var_used = 'OPENROUTER_API_KEY'
 
     # --- Validate API Key ---
     if not api_key:
         print(f"Error: Required API key environment variable '{env_var_used}' is not set for the determined API target '{api_target.upper()}'.")
         sys.exit(1)
 
+    # --- Log Final Config ---
     print(f"Using API Target: {api_target.upper()}")
     print(f"Using API Key from env var: {env_var_used}")
     if api_target == "openrouter":
         print(f"OpenRouter Referrer: {os.getenv('OPENROUTER_REFERRER', 'http://localhost')}")
         print(f"OpenRouter Title: {os.getenv('OPENROUTER_TITLE', 'AI Question Answering Script')}")
     print(f"Using {args.workers} parallel worker(s).")
+    if args.canonical_name:
+        print(f"Using canonical name for logging: {args.canonical_name}")
+    else:
+        print(f"Using original model ID for logging: {model_id}")
+
 
     # --- Process Files ---
     total_start_time = time.time()
@@ -733,15 +767,16 @@ def main():
             files_failed_count += 1
             continue
         try:
-            # Pass the determined api_target and api_key
+            # Pass the determined api_target, api_key and canonical_name
             process_questions(
-                questions_file,
-                model_id,
-                api_target,
-                api_key,
-                args.workers,
-                args.force_restart,
-                args.force_retry_permanent_errors
+                questions_file=questions_file,
+                model_id=model_id,
+                canonical_name=args.canonical_name, # Pass canonical name (can be None)
+                api_target=api_target,
+                api_key=api_key,
+                num_workers=args.workers,
+                force_restart=args.force_restart,
+                force_retry_permanent=args.force_retry_permanent_errors
                 )
             files_processed_count += 1
         except KeyboardInterrupt:
@@ -759,9 +794,13 @@ def main():
 
     # --- Overall Summary ---
     total_end_time = time.time()
+    model_name_logged = args.canonical_name if args.canonical_name else model_id
     print("\n" + "="*40)
     print("Overall Summary:")
-    print(f"  Model processed: {model_id} (API: {api_target.upper()})")
+    print(f"  Model requested: {model_id}")
+    if args.canonical_name:
+        print(f"  Model name logged: {args.canonical_name}")
+    print(f"  API Provider used: {api_target.upper()}")
     print(f"  Total files attempted: {len(args.questions_files)}")
     print(f"  Files processed successfully: {files_processed_count}")
     print(f"  Files failed/skipped/interrupted: {files_failed_count}")

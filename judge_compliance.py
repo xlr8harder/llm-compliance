@@ -14,6 +14,8 @@ import datetime
 from pathlib import Path
 from requests.exceptions import RequestException
 
+JUDGE_MODEL = "openai/gpt-4o-2024-11-20"
+
 # --- Constants ---
 TRANSIENT_FAILURE_MARKER = object() # Use a unique object as a marker
 # Add counters for overall progress reporting
@@ -26,7 +28,8 @@ OPENAI_MODELS_CHECK_DONE = False
 OPENAI_MODELS_LOCK = threading.Lock()
 
 # --- API Endpoint Constants ---
-OPENAI_API_BASE = "https://api.openai.com/v1"
+OPENAI_API_BASE =     "https://openrouter.ai/api/v1"
+#OPENAI_API_BASE = "https://api.openai.com/v1"
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 # Fireworks not typically used for judging, but keep base URL if needed later
 # FIREWORKS_API_BASE = "https://api.fireworks.ai/inference/v1"
@@ -351,6 +354,8 @@ def judge_single_response_worker(entry, judge_model_id, judge_api_target, judge_
     if response_text is None:
         analysis_result["judge_analysis"] = "Original response data invalid, contained an error, or content was not found."
         analysis_result["compliance"] = "ERROR_ORIGINAL_RESPONSE"
+        print(entry)
+        print(analysis_result)
         return entry, analysis_result # Return immediately
 
     # --- Proceed with judging ---
@@ -372,6 +377,7 @@ def judge_single_response_worker(entry, judge_model_id, judge_api_target, judge_
         # --- Handle Judge API Call Results ---
         if judge_api_response is TRANSIENT_FAILURE_MARKER:
             # Propagate transient failure marker up
+            print(judge_api_response)
             print(f"[Worker] QID {question_id}: Judging failed transiently after retries via {judge_api_target.upper()}.")
             return entry, TRANSIENT_FAILURE_MARKER
 
@@ -381,6 +387,8 @@ def judge_single_response_worker(entry, judge_model_id, judge_api_target, judge_
             analysis_result["judge_analysis"] = error_msg
             analysis_result["compliance"] = "ERROR_JUDGE_API"
             analysis_result["raw_judge_response"] = str(judge_api_response)
+            print(judge_api_response)
+            print(analysis_result)
             print(f"[Worker] QID {question_id}: {error_msg}")
             # Return the error status - main loop handles 'fatal' policy
             return entry, analysis_result
@@ -422,6 +430,8 @@ def judge_single_response_worker(entry, judge_model_id, judge_api_target, judge_
                      print(f"[Worker] QID {question_id}: {error_msg}")
                      analysis_result["judge_analysis"] += f"\n\nERROR: {error_msg}"
                      analysis_result["compliance"] = "ERROR_JUDGE_FORMAT"
+                     print(judge_api_response)
+                     print(analysis_result)
                      # loop will terminate
 
         except (KeyError, IndexError, TypeError, AttributeError) as e:
@@ -431,6 +441,8 @@ def judge_single_response_worker(entry, judge_model_id, judge_api_target, judge_
             analysis_result["judge_analysis"] = error_msg
             analysis_result["compliance"] = "ERROR_JUDGE_PARSE"
             analysis_result["raw_judge_response"] = str(judge_api_response)
+            print(judge_api_response)
+            print(analysis_result)
             # Break the loop as we can't parse this response
             break
 
@@ -549,6 +561,7 @@ def process_responses_file(response_file_path, judge_model_id, judge_api_target,
                         # --- Apply FATAL error policy for Judging Errors ---
                         is_error = compliance_status.startswith("ERROR_")
                         if is_error:
+                            print(analysis_result)
                             tasks_failed_permanently += 1
                             error_msg = analysis_result.get('judge_analysis', 'Unknown judging error')
                             error_code = compliance_status
@@ -646,9 +659,8 @@ def main():
         description='Analyze model responses for compliance using a judge model (OpenAI or OpenRouter), with parallel processing. Halts on judging errors.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
         )
-    parser.add_argument('judge_model', help='Judge model identifier (e.g., "openai/gpt-4o", "anthropic/claude-3-haiku")')
     parser.add_argument('response_files', nargs='+', help='One or more JSONL response files (output from ask.py)')
-    parser.add_argument('-w', '--workers', type=int, default=4, help='Number of parallel worker threads for judging API requests.')
+    parser.add_argument('-w', '--workers', type=int, default=30, help='Number of parallel worker threads for judging API requests.')
     parser.add_argument('--force-restart', action='store_true', help='Delete existing analysis output file(s) and start fresh.')
     # Keep the argument for potential future flexibility, but default to fatal
     parser.add_argument('--judging-errors', choices=['fatal'], default='fatal',
@@ -665,39 +677,39 @@ def main():
 
 
     # --- Determine Judge API Target and Key ---
-    judge_model_id = args.judge_model
+    judge_model_id = JUDGE_MODEL
     judge_api_target = ""
     judge_api_key = None
     judge_env_var_used = ""
 
-    if judge_model_id.startswith('openai/'):
-        print(f"Judge model '{judge_model_id}' starts with 'openai/'. Checking availability...")
-        openai_key = os.getenv('OPENAI_API_KEY')
-        if not openai_key:
-            print("Warning: OPENAI_API_KEY environment variable not set.")
-            print("Attempting fallback to OpenRouter for the judge model...")
-            judge_api_target = "openrouter"
-            judge_api_key = os.getenv('OPENROUTER_API_KEY')
-            judge_env_var_used = 'OPENROUTER_API_KEY'
-        else:
-            available_openai_models = get_openai_models(openai_key)
-            openai_model_name_only = judge_model_id.split('/')[-1]
-            if openai_model_name_only in available_openai_models:
-                print(f"Judge model '{openai_model_name_only}' found in OpenAI API. Using OpenAI for judging.")
-                judge_api_target = "openai"
-                judge_api_key = openai_key
-                judge_env_var_used = 'OPENAI_API_KEY'
-            else:
-                print(f"Judge model '{openai_model_name_only}' not found in available OpenAI models.")
-                print("Attempting fallback to OpenRouter for judging...")
-                judge_api_target = "openrouter"
-                judge_api_key = os.getenv('OPENROUTER_API_KEY')
-                judge_env_var_used = 'OPENROUTER_API_KEY'
-    else:
-        print(f"Judge model '{judge_model_id}' does not start with 'openai/'. Assuming OpenRouter for judging.")
-        judge_api_target = "openrouter"
-        judge_api_key = os.getenv('OPENROUTER_API_KEY')
-        judge_env_var_used = 'OPENROUTER_API_KEY'
+    #if judge_model_id.startswith('openai/'):
+        #print(f"Judge model '{judge_model_id}' starts with 'openai/'. Checking availability...")
+        #openai_key = os.getenv('OPENAI_API_KEY')
+        #if not openai_key:
+            #print("Warning: OPENAI_API_KEY environment variable not set.")
+            #print("Attempting fallback to OpenRouter for the judge model...")
+            #judge_api_target = "openrouter"
+            #judge_api_key = os.getenv('OPENROUTER_API_KEY')
+            #judge_env_var_used = 'OPENROUTER_API_KEY'
+        #else:
+            #available_openai_models = get_openai_models(openai_key)
+            #openai_model_name_only = judge_model_id.split('/')[-1]
+            #if openai_model_name_only in available_openai_models:
+                #print(f"Judge model '{openai_model_name_only}' found in OpenAI API. Using OpenAI for judging.")
+                #judge_api_target = "openai"
+                #judge_api_key = openai_key
+                #judge_env_var_used = 'OPENAI_API_KEY'
+            #else:
+                #print(f"Judge model '{openai_model_name_only}' not found in available OpenAI models.")
+                #print("Attempting fallback to OpenRouter for judging...")
+                #judge_api_target = "openrouter"
+                #judge_api_key = os.getenv('OPENROUTER_API_KEY')
+                #judge_env_var_used = 'OPENROUTER_API_KEY'
+    #else:
+    print(f"Judge model '{judge_model_id}' does not start with 'openai/'. Assuming OpenRouter for judging.")
+    judge_api_target = "openrouter"
+    judge_api_key = os.getenv('OPENROUTER_API_KEY')
+    judge_env_var_used = 'OPENROUTER_API_KEY'
 
     if not judge_api_key:
         print(f"Error: Required API key environment variable '{judge_env_var_used}' is not set for the determined judge API target '{judge_api_target.upper()}'.")
