@@ -18,22 +18,19 @@ TRANSIENT_FAILURE_MARKER = object() # Use a unique object marker
 # Add a counter for overall progress reporting
 PROGRESS_COUNTER = 0
 PROGRESS_LOCK = threading.Lock()
-VALID_PROVIDERS = ["openai", "openrouter", "fireworks"] # Define valid provider names
-
-# --- Global Cache for OpenAI Models ---
-OPENAI_MODELS_CACHE = None
-OPENAI_MODELS_CHECK_DONE = False
-OPENAI_MODELS_LOCK = threading.Lock()
+# Define valid provider names
+VALID_PROVIDERS = ["openai", "openrouter", "fireworks", "chutes"]
 
 # --- API Endpoint Constants ---
 OPENAI_API_BASE = "https://api.openai.com/v1"
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 FIREWORKS_API_BASE = "https://api.fireworks.ai/inference/v1"
+CHUTES_API_BASE = "https://llm.chutes.ai/v1"
 
 # --- Helper Functions for Identifying Response Types ---
 def is_permanent_api_error(resp):
     """Checks if the response structure indicates a permanent error reported by the API provider."""
-    # This function seems generic enough for OpenAI, OpenRouter, Fireworks errors
+    # This function seems generic enough for OpenAI, OpenRouter, Fireworks, Chutes errors
     try:
         # Case 1: Error within choices (e.g., content filter)
         if (isinstance(resp, dict) and
@@ -260,40 +257,6 @@ def cleanup_permanent_errors(output_file):
 
 # --- API Interaction ---
 
-def get_openai_models(api_key):
-    """Fetches the list of available models from the OpenAI API."""
-    global OPENAI_MODELS_CACHE, OPENAI_MODELS_CHECK_DONE
-    # Use lock to prevent multiple threads trying to fetch simultaneously
-    with OPENAI_MODELS_LOCK:
-        if OPENAI_MODELS_CHECK_DONE:
-            return OPENAI_MODELS_CACHE
-
-        print("Fetching available models from OpenAI API...")
-        headers = {"Authorization": f"Bearer {api_key}"}
-        try:
-            response = requests.get(f"{OPENAI_API_BASE}/models", headers=headers, timeout=30)
-            response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-            models_data = response.json()
-            # OpenAI format is a list under the 'data' key, each item has an 'id'
-            model_ids = {model['id'] for model in models_data.get('data', []) if 'id' in model}
-            print(f"Found {len(model_ids)} models available via OpenAI API.")
-            OPENAI_MODELS_CACHE = model_ids
-            OPENAI_MODELS_CHECK_DONE = True
-            return OPENAI_MODELS_CACHE
-        except RequestException as e:
-            print(f"Error fetching OpenAI models: {e}")
-            print("Could not verify OpenAI models. Will fall back to OpenRouter for 'openai/' prefixed models if not forced.")
-            OPENAI_MODELS_CACHE = set() # Indicate check failed, cache empty set
-            OPENAI_MODELS_CHECK_DONE = True
-            return OPENAI_MODELS_CACHE
-        except Exception as e:
-            print(f"Unexpected error fetching OpenAI models: {type(e).__name__}: {e}")
-            traceback.print_exc()
-            OPENAI_MODELS_CACHE = set() # Indicate check failed
-            OPENAI_MODELS_CHECK_DONE = True
-            return OPENAI_MODELS_CACHE
-
-
 def retry_with_backoff(func, api_provider_name, max_retries=8, initial_delay=1):
     """Retry a function with exponential backoff for transient errors."""
     retries = 0
@@ -302,23 +265,19 @@ def retry_with_backoff(func, api_provider_name, max_retries=8, initial_delay=1):
         try:
             result = func()
             # Check for non-200 responses that indicate permanent client errors
-            # This logic might need slight adjustment based on specific API's permanent error codes
             if isinstance(result, dict):
                  status_code = result.get("status_code") # Check if make_request added this
                  if status_code and status_code >= 400 and status_code not in [429, 500, 502, 503, 504]: # Add more retryable codes if needed
-                    # Check for specific OpenAI 'invalid_request_error' which shouldn't be retried
                     error_info = result.get("error", {})
-                    if isinstance(error_info, dict) and error_info.get("type") == "invalid_request_error":
-                         print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Permanent client error (invalid_request_error). Not retrying.")
-                         # Return the error structure directly
+                    # Check for specific non-retryable error types if needed by provider
+                    if isinstance(error_info, dict) and error_info.get("type") == "invalid_request_error": # Example: OpenAI specific
+                         print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Permanent client error ({error_info.get('type', 'N/A')}). Not retrying.")
                          return {"error": error_info}
 
                     # Generic non-retryable client error
                     print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Non-retryable client error ({status_code}). Treating as permanent failure.")
-                    # Return the error structure directly from make_request
                     return {"error": result.get("error_detail", f"Permanent Client Error {status_code}")}
 
-            # If it's not a dict with a permanent error code, assume success or retryable
             return result # Return successful response or result triggering exception below
 
         # Catch exceptions that indicate a *potentially* transient issue
@@ -340,8 +299,7 @@ def retry_with_backoff(func, api_provider_name, max_retries=8, initial_delay=1):
 
             base_delay = initial_delay * (2 ** (retries - 1))
             jitter = base_delay * 0.1
-            # Cap max delay, ensure non-negative
-            actual_delay = max(0, min(base_delay + random.uniform(-jitter, jitter), 60))
+            actual_delay = max(0, min(base_delay + random.uniform(-jitter, jitter), 60)) # Cap max delay
             time.sleep(actual_delay)
 
     # Should not be reached if max_retries > 0
@@ -353,100 +311,87 @@ def ask_question(question, model_id, api_target, api_key):
     """Send a question to the specified API endpoint. Handles retries internally."""
     url = ""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    data = {"messages": [{"role": "user", "content": question}]}
-    api_provider_name = "Unknown" # For logging
-    model_name_for_api = model_id # Default to using the full model ID
+    data = {
+        "model": model_id, # The model_id is passed directly from args.model
+        "messages": [{"role": "user", "content": question}]
+        # Add other parameters like temperature, max_tokens here if needed globally
+        # "temperature": 0.7,
+        # "max_tokens": 1024,
+        # "stream": False # Assuming non-streaming for this script
+    }
+    api_provider_name = api_target # Use lowercase target name directly
 
     # --- Configure API details based on target ---
     if api_target == "openai":
-        api_provider_name = "OpenAI"
-        # OpenAI expects model ID without prefix
-        model_name_for_api = model_id.split('/')[-1] if '/' in model_id else model_id
         url = f"{OPENAI_API_BASE}/chat/completions"
-        data["model"] = model_name_for_api
-        # No extra headers needed for OpenAI typically
+        # No extra headers or data modifications needed for OpenAI usually
 
     elif api_target == "openrouter":
-        api_provider_name = "OpenRouter"
         url = f"{OPENROUTER_API_BASE}/chat/completions"
-        data["model"] = model_id # OpenRouter expects the full model ID
-        model_name_for_api = model_id # Keep for logging consistency later
         headers["HTTP-Referer"] = os.getenv("OPENROUTER_REFERRER", "http://localhost")
         headers["X-Title"] = os.getenv("OPENROUTER_TITLE", "AI Question Answering Script")
 
     elif api_target == "fireworks":
-        api_provider_name = "FireworksAI"
         url = f"{FIREWORKS_API_BASE}/chat/completions"
-        data["model"] = model_id # Fireworks uses full model ID
-        model_name_for_api = model_id # Keep for logging consistency later
-        # No extra headers needed for Fireworks typically
+        # No extra headers or data modifications needed for Fireworks usually
+
+    elif api_target == "chutes":
+        url = f"{CHUTES_API_BASE}/chat/completions"
+        # No extra headers or data modifications needed for Chutes based on example
 
     else:
-        # Should not happen if main logic is correct
+        # Should not happen if main logic is correct due to mandatory --provider
         print(f"ERROR: Unknown api_target '{api_target}' in ask_question.")
         return {"error": {"message": f"Internal configuration error: Unknown API target '{api_target}'", "code": "config_error"}}
 
     # --- Define the request function for retry logic ---
     def make_request():
-        response = requests.post(url=url, headers=headers, data=json.dumps(data), timeout=180) # Increased timeout
+        response = requests.post(url=url, headers=headers, data=json.dumps(data), timeout=180)
 
         # --- Handle non-200 responses ---
         if response.status_code != 200:
             status_code = response.status_code
             error_details = f"Status Code: {status_code}"
-            error_json = None # Store potential error JSON from response body
+            error_json = None
             try:
                 resp_json = response.json()
-                error_json = resp_json.get('error') # Standard location for OpenAI/OR
-                error_msg = ""
-                if isinstance(error_json, dict):
-                     error_msg = error_json.get('message', str(error_json))
-                elif isinstance(error_json, str):
-                     error_msg = error_json
-                else: # Fallback if error format is unexpected
-                     error_msg = str(resp_json)
-
+                if 'error' in resp_json:
+                    error_json = resp_json['error']
+                    error_msg = str(error_json.get('message', error_json)) if isinstance(error_json, dict) else str(error_json)
+                else:
+                    error_msg = str(resp_json) # Fallback if no 'error' key
                 error_details += f", Body: {error_msg}"
             except json.JSONDecodeError:
                 error_details += f", Body (non-JSON): {response.text[:500]}"
-            except Exception: # Catch other potential issues parsing error
+            except Exception:
                  error_details += f", Body (error parsing): {response.text[:500]}"
 
-
             # --- Classify error for retry/failure ---
-            # Retryable server errors and rate limiting
             if status_code >= 500 or status_code == 429:
-                # Raise exception for retry_with_backoff to catch
                 raise RequestException(f"Retryable {api_provider_name} server/rate limit error: {error_details}")
             # Specific non-retryable client errors (e.g., OpenAI invalid request)
-            elif api_target == "openai" and isinstance(error_json, dict) and error_json.get("type") == "invalid_request_error":
-                 # Return dict for retry_with_backoff to identify as permanent
+            elif isinstance(error_json, dict) and error_json.get("type") == "invalid_request_error":
                  return {"status_code": status_code, "error": error_json, "error_detail": error_details}
             # Other client errors (4xx except 429) - treat as permanent
             else:
                  print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API Client error: {error_details}. Treating as permanent failure.")
-                 # Return dict for retry_with_backoff to identify as permanent
-                 # Try to return the structured error if possible
                  error_payload = error_json if error_json else {"message": f"Permanent Client Error: {error_details}", "code": status_code}
+                 if not isinstance(error_payload, (dict, str)): # Ensure error is dict or string
+                     error_payload = {"message": str(error_payload), "code": status_code}
                  return {"status_code": status_code, "error": error_payload, "error_detail": error_details}
-
 
         # --- Handle successful 200 OK response ---
         try:
             response_data = response.json()
-            # Basic validation of success response structure
             if not isinstance(response_data, dict):
                 raise ValueError(f"Unexpected {api_provider_name} response format (not dict): {type(response_data)}")
-            # Deeper validation could be added here if needed (e.g., check for 'choices')
-            # Add the provider info and actual model used to the response for logging consistency
-            response_data["_provider_used"] = api_provider_name
-            response_data["_model_used_for_api"] = model_name_for_api
+            # Add internal metadata for logging
+            response_data["_provider_used"] = api_provider_name # Log the provider used (lowercase)
+            response_data["_model_used_for_api"] = model_id # Log the model name sent to API
             return response_data
         except json.JSONDecodeError as e:
-            # Treat JSON decode error on 200 OK as potentially transient
             raise ValueError(f"Failed to decode {api_provider_name} JSON on 200 OK: {e}. Response: {response.text[:500]}")
         except Exception as e:
-             # Catch other unexpected errors processing successful response
              raise ValueError(f"Error processing successful {api_provider_name} response: {type(e).__name__}: {e}")
 
 
@@ -456,36 +401,32 @@ def ask_question(question, model_id, api_target, api_key):
 # --- Worker Function ---
 def process_single_question_worker(question_data, model_id, api_target, api_key):
     """Worker function to process a single question using the determined API target."""
-    # Add api_target and api_key parameters
     response = ask_question(
         question_data.get('question', '[Missing Question]'),
-        model_id, # Pass the original model ID requested
-        api_target, # Pass the determined API target
-        api_key     # Pass the corresponding API key
+        model_id,
+        api_target,
+        api_key
         )
-    # Response now contains '_provider_used' and '_model_used_for_api' if successful
     return question_data, response
 
 # --- Main Processing Logic ---
 def process_questions(questions_file, model_id, canonical_name, api_target, api_key, num_workers, force_restart=False, force_retry_permanent=False):
     """Process questions in parallel, save responses, handle resumes and cleanup."""
-    # Added canonical_name, api_target, api_key parameters
-    global PROGRESS_COUNTER # Use global counter
+    global PROGRESS_COUNTER
     PROGRESS_COUNTER = 0 # Reset counter for each file
 
     output_dir = Path("responses")
     output_dir.mkdir(exist_ok=True)
     questions_filename = Path(questions_file).stem
-    # Use a safe version of the *canonical* or original model ID for the filename
+    # Use canonical name if provided for filename, else use the model_id
     output_model_name = canonical_name if canonical_name else model_id
-    safe_output_model_name = output_model_name.replace('/', '_').replace(':', '-') # Replace common invalid chars
+    safe_output_model_name = output_model_name.replace('/', '_').replace(':', '-')
     output_file = output_dir / f"{questions_filename}_{safe_output_model_name}.jsonl"
 
     questions, loaded_ok = load_questions(questions_file)
     if not loaded_ok:
-        return # Error message printed in load_questions
+        return
     total_questions = len(questions)
-    # print(f"Loaded {total_questions} questions from {questions_file}") # Printed in load_questions
 
     # --- Resume / Restart Logic ---
     if force_retry_permanent:
@@ -494,8 +435,7 @@ def process_questions(questions_file, model_id, canonical_name, api_target, api_
             cleanup_successful = cleanup_permanent_errors(output_file)
             if not cleanup_successful:
                 print("ERROR: Cleanup failed. Cannot proceed with retrying permanent errors.")
-                # Depending on desired behavior, you might exit or just continue without retries
-                return # Exit this file processing
+                return
             print("Permanent error cleanup finished.")
         else:
             print("Output file does not exist, no permanent errors to clean.")
@@ -505,7 +445,7 @@ def process_questions(questions_file, model_id, canonical_name, api_target, api_
          if not force_restart:
               processed_ids = load_existing_responses(output_file)
               print(f"Resuming. Found {len(processed_ids)} completed entries in '{output_file}'.")
-         elif force_retry_permanent: # If FRPE was used, load IDs *after* cleanup
+         elif force_retry_permanent:
               processed_ids = load_existing_responses(output_file)
               print(f"Found {len(processed_ids)} entries remaining after permanent error cleanup in '{output_file}'.")
          else: # force_restart is True and not force_retry_permanent
@@ -551,21 +491,18 @@ def process_questions(questions_file, model_id, canonical_name, api_target, api_
     start_time = time.time()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
-        # Submit tasks with the determined api_target and api_key
         futures = [executor.submit(process_single_question_worker, q_data, model_id, api_target, api_key)
                    for q_data in questions_to_process]
 
         for future in concurrent.futures.as_completed(futures):
             try:
-                # Get results from the worker
-                question_data, response = future.result() # Worker now returns only these two
-                question_id = question_data.get('id', '[Missing ID]') # Get ID again safely
-                questions_processed_this_run += 1 # Count completed task
+                question_data, response = future.result()
+                question_id = question_data.get('id', '[Missing ID]')
+                questions_processed_this_run += 1
 
-                # Extract provider and model info from response if available (added by ask_question on success)
-                # Provide defaults if the response was an error or marker
-                provider_used = response.get("_provider_used", api_target) if isinstance(response, dict) else api_target
-                model_used_for_api = response.get("_model_used_for_api", "[Unknown - Error]") if isinstance(response, dict) else "[Unknown - Error]"
+                # Extract metadata added by ask_question, using fallbacks if it failed early
+                provider_used = response.get("_provider_used", api_target) if isinstance(response, dict) else api_target # Use lowercase target as fallback
+                model_used_for_api = response.get("_model_used_for_api", model_id) if isinstance(response, dict) else model_id # Use input model_id as fallback
 
                 # Clean up internal fields from the response object before logging
                 if isinstance(response, dict):
@@ -581,69 +518,58 @@ def process_questions(questions_file, model_id, canonical_name, api_target, api_
                         "question_id": question_id,
                         "category": question_data.get('category'),
                         "question": question_data.get('question'),
-                        "model": model_name_to_log, # Log canonical name or original model_id
-                        "api_provider": provider_used, # Log which API was actually used
+                        "model": model_name_to_log, # Log canonical name or original API model_id
+                        "api_provider": provider_used, # Log the provider used (lowercase)
                         "api_model": model_used_for_api, # Log model name sent to API
                         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                         "response": response # Contains the full API response (or error structure)
                     }
-                    # Add optional domain field if present in input
                     if 'domain' in question_data:
                         output_entry['domain'] = question_data['domain']
-
 
                     # --- Thread-safe writing to output file ---
                     try:
                         with output_lock:
                             with open(output_file, 'a', encoding='utf-8') as f:
                                 f.write(json.dumps(output_entry, ensure_ascii=False) + '\n')
-                            # Add ID to set *only* after successful write
-                            processed_ids.add(question_id)
+                            processed_ids.add(question_id) # Add ID *only* after successful write
                         questions_logged_this_run += 1
 
                         # --- Simple Progress Indicator ---
-                        with PROGRESS_LOCK: # Lock the counter update/read
+                        with PROGRESS_LOCK:
                              PROGRESS_COUNTER += 1
-                             # Print progress every N items or based on percentage
                              if PROGRESS_COUNTER % 10 == 0 or PROGRESS_COUNTER == num_to_process:
                                  elapsed = time.time() - start_time
                                  rate = PROGRESS_COUNTER / elapsed if elapsed > 0 else 0
                                  percent_done = (PROGRESS_COUNTER / num_to_process) * 100
-                                 print(f"  Progress: {PROGRESS_COUNTER}/{num_to_process} ({percent_done:.1f}%) completed. Rate: {rate:.2f} Q/s.")
+                                 print(f"  Progress: {PROGRESS_COUNTER}/{num_to_process} ({percent_done:.1f}%) logged. Rate: {rate:.2f} Q/s.")
 
                     except Exception as write_e:
-                         # Handle potential write errors critically
                          print(f"\nCRITICAL ERROR writing entry for Q ID {question_id}: {write_e}")
                          traceback.print_exc()
-                         # Decide if this should stop processing? For now, continue.
 
             except Exception as future_e:
-                 # Handle errors retrieving result from future (e.g., worker raised unexpected exception)
                  print(f"\nCRITICAL ERROR processing future result: {type(future_e).__name__}: {future_e}")
                  traceback.print_exc()
-                 # We don't know which question ID this was for easily without more complex tracking
-                 # Consider this a failure, but maybe don't increment transient count
 
     # --- Final Summary ---
     end_time = time.time()
     duration = end_time - start_time
     print("-" * 30)
     print(f"Finished processing {questions_file}.")
-    print(f"  Model requested: {model_id}")
+    print(f"  Model requested for API: {model_id}") # Use the API model name here
     if canonical_name:
-        print(f"  Canonical name used: {canonical_name}")
+        print(f"  Canonical name used for logging/filename: {canonical_name}")
     print(f"  API Target used: {api_target.upper()}")
     print(f"  Total questions in file: {total_questions}")
     print(f"  Tasks submitted this run: {num_to_process}")
     print(f"  Tasks completed by workers: {questions_processed_this_run}")
     print(f"  Responses logged this run (Success/PermError): {questions_logged_this_run}")
     print(f"  Tasks failed transiently this run (will retry): {questions_failed_transiently_this_run}")
-    # Calculate permanent failures more accurately
     permanent_failures_this_run = questions_processed_this_run - questions_logged_this_run - questions_failed_transiently_this_run
     print(f"  Tasks failed permanently this run (or worker error): {permanent_failures_this_run}")
     print(f"  Processing duration: {duration:.2f} seconds")
-    # Recalculate final count from file for accuracy
-    final_processed_ids = load_existing_responses(output_file)
+    final_processed_ids = load_existing_responses(output_file) # Recalculate final count
     print(f"  Total logged entries in file now: {len(final_processed_ids)} / {total_questions}")
     print(f"  Output file: {output_file}")
     print("-" * 30)
@@ -651,15 +577,18 @@ def process_questions(questions_file, model_id, canonical_name, api_target, api_
 # --- Main Execution ---
 def main():
     parser = argparse.ArgumentParser(
-        description='Ask questions via API in parallel, supporting OpenAI, OpenRouter, and FireworksAI, with retries for transient errors. Logs successes and permanent errors.',
+        description='Ask questions via API in parallel, supporting multiple providers (OpenAI, OpenRouter, FireworksAI, Chutes), with retries for transient errors. Logs successes and permanent errors.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('model', help='Model identifier (e.g., "openai/gpt-4o", "google/gemini-1.5-flash", "accounts/fireworks/models/llama-v3p1-405b-instruct")')
+    # Adjusted model help text
+    parser.add_argument('model', help='Model identifier specific to the chosen API provider (e.g., "gpt-4o", "google/gemini-1.5-flash", "accounts/fireworks/models/llama-v3p1-405b-instruct", "THUDM/GLM-4-32B-0414")')
     parser.add_argument('questions_files', nargs='+', help='One or more JSONL question files (must contain "id" and "question" fields).')
+    # Modified provider argument
+    parser.add_argument('--provider', choices=VALID_PROVIDERS, required=True, help='MANDATORY: Specify the API provider to use.')
+    parser.add_argument('--canonical-name', help='Optional canonical name for the model used in the output file name and logs (if different from the API model name).')
     parser.add_argument('-w', '--workers', type=int, default=4, help='Number of parallel worker threads for API requests.') # Sensible default > 1
     parser.add_argument('--force-restart', action='store_true', help='Delete existing output file and start fresh (overrides --force-retry-permanent-errors).')
     parser.add_argument('--force-retry-permanent-errors', '--frpe', action='store_true', help='Remove logged permanent errors from the output file before starting, forcing retry.')
-    parser.add_argument('--force_provider', choices=VALID_PROVIDERS, help='Force the use of a specific API provider (overrides automatic detection).')
-    parser.add_argument('--canonical-name', help='Canonical name for the model to be written in the output file.')
+
     args = parser.parse_args()
 
     if args.workers < 1:
@@ -667,80 +596,37 @@ def main():
         sys.exit(1)
     if args.force_restart and args.force_retry_permanent_errors:
         print("Warning: --force-restart overrides --force-retry-permanent-errors. Proceeding with full restart.")
-        args.force_retry_permanent_errors = False # Disable FRPE if full restart is chosen
+        args.force_retry_permanent_errors = False
 
-    # --- Determine API Target and Key ---
-    model_id = args.model
-    api_target = "" # Will be 'openai', 'openrouter', or 'fireworks'
+    # --- Determine API Target and Key based on mandatory --provider ---
+    model_id = args.model # This is the API-specific model name
+    api_target = args.provider.lower() # Set target directly from argument
     api_key = None
     env_var_used = ""
-    provider_forced = False
 
-    # 1. Check for forced provider
-    if args.force_provider:
-        provider_forced = True
-        forced_provider = args.force_provider.lower()
-        print(f"Provider override specified: Forcing use of '{forced_provider.upper()}' API.")
-        api_target = forced_provider
-        if forced_provider == "openai":
-            api_key = os.getenv('OPENAI_API_KEY')
-            env_var_used = 'OPENAI_API_KEY'
-        elif forced_provider == "openrouter":
-            api_key = os.getenv('OPENROUTER_API_KEY')
-            env_var_used = 'OPENROUTER_API_KEY'
-        elif forced_provider == "fireworks":
-            api_key = os.getenv('FIREWORKS_API_KEY')
-            env_var_used = 'FIREWORKS_API_KEY'
-        else:
-            # This shouldn't happen due to argparse choices, but check anyway
-            print(f"Error: Invalid forced provider '{args.force_provider}'. Valid choices are: {VALID_PROVIDERS}")
-            sys.exit(1)
+    print(f"Provider specified: Using '{api_target.upper()}' API.")
 
-    # 2. If provider not forced, determine automatically
-    if not provider_forced:
-        # Check for OpenAI prefix
-        if model_id.startswith('openai/'):
-            print(f"Model '{model_id}' starts with 'openai/'. Checking availability...")
-            openai_key = os.getenv('OPENAI_API_KEY')
-            if not openai_key:
-                print("Warning: OPENAI_API_KEY environment variable not set.")
-                print("Attempting fallback to OpenRouter for this model...")
-                api_target = "openrouter"
-                api_key = os.getenv('OPENROUTER_API_KEY')
-                env_var_used = 'OPENROUTER_API_KEY'
-            else:
-                available_openai_models = get_openai_models(openai_key)
-                # OpenAI API uses model ID *without* the prefix
-                openai_model_name_only = model_id.split('/')[-1]
-                if openai_model_name_only in available_openai_models:
-                    print(f"Model '{openai_model_name_only}' found in OpenAI API. Using OpenAI.")
-                    api_target = "openai"
-                    api_key = openai_key
-                    env_var_used = 'OPENAI_API_KEY'
-                else:
-                    print(f"Model '{openai_model_name_only}' not found in available OpenAI models.")
-                    print("Attempting fallback to OpenRouter...")
-                    api_target = "openrouter"
-                    api_key = os.getenv('OPENROUTER_API_KEY')
-                    env_var_used = 'OPENROUTER_API_KEY'
+    if api_target == "openai":
+        api_key = os.getenv('OPENAI_API_KEY')
+        env_var_used = 'OPENAI_API_KEY'
+    elif api_target == "openrouter":
+        api_key = os.getenv('OPENROUTER_API_KEY')
+        env_var_used = 'OPENROUTER_API_KEY'
+    elif api_target == "fireworks":
+        api_key = os.getenv('FIREWORKS_API_KEY')
+        env_var_used = 'FIREWORKS_API_KEY'
+    elif api_target == "chutes":
+        api_key = os.getenv('CHUTES_API_KEY') # Use CHUTES_API_TOKEN as per example
+        env_var_used = 'CHUTES_API_KEY'
+    else:
+        # Safeguard, though argparse choices should prevent this
+        print(f"Error: Internal error - Invalid provider '{api_target}' selected.")
+        sys.exit(1)
 
-        # Check for Fireworks prefix
-        elif model_id.startswith('accounts/fireworks/'):
-            print(f"Model '{model_id}' identified as FireworksAI model.")
-            api_target = "fireworks"
-            api_key = os.getenv('FIREWORKS_API_KEY')
-            env_var_used = 'FIREWORKS_API_KEY'
-
-        # Default to OpenRouter
-        else:
-            print(f"Model '{model_id}' not recognized as OpenAI or FireworksAI. Assuming OpenRouter.")
-            api_target = "openrouter"
-            api_key = os.getenv('OPENROUTER_API_KEY')
-            env_var_used = 'OPENROUTER_API_KEY'
 
     # --- Validate API Key ---
     if not api_key:
-        print(f"Error: Required API key environment variable '{env_var_used}' is not set for the determined API target '{api_target.upper()}'.")
+        print(f"Error: Required API key environment variable '{env_var_used}' is not set for the chosen API provider '{api_target.upper()}'.")
         sys.exit(1)
 
     # --- Log Final Config ---
@@ -750,10 +636,12 @@ def main():
         print(f"OpenRouter Referrer: {os.getenv('OPENROUTER_REFERRER', 'http://localhost')}")
         print(f"OpenRouter Title: {os.getenv('OPENROUTER_TITLE', 'AI Question Answering Script')}")
     print(f"Using {args.workers} parallel worker(s).")
+    # Log API model name and canonical name if provided
+    print(f"Using API model name: {model_id}")
     if args.canonical_name:
-        print(f"Using canonical name for logging: {args.canonical_name}")
+        print(f"Using canonical name for logging/filename: {args.canonical_name}")
     else:
-        print(f"Using original model ID for logging: {model_id}")
+        print(f"Using API model name for logging/filename (no canonical name provided).")
 
 
     # --- Process Files ---
@@ -767,10 +655,10 @@ def main():
             files_failed_count += 1
             continue
         try:
-            # Pass the determined api_target, api_key and canonical_name
+            # Pass the determined api_target, api_key, the API model_id, and optional canonical_name
             process_questions(
                 questions_file=questions_file,
-                model_id=model_id,
+                model_id=model_id, # Pass the API-specific model name
                 canonical_name=args.canonical_name, # Pass canonical name (can be None)
                 api_target=api_target,
                 api_key=api_key,
@@ -794,12 +682,11 @@ def main():
 
     # --- Overall Summary ---
     total_end_time = time.time()
-    model_name_logged = args.canonical_name if args.canonical_name else model_id
     print("\n" + "="*40)
     print("Overall Summary:")
-    print(f"  Model requested: {model_id}")
+    print(f"  API Model used: {model_id}") # Display the model name passed to the API
     if args.canonical_name:
-        print(f"  Model name logged: {args.canonical_name}")
+        print(f"  Canonical Name logged: {args.canonical_name}")
     print(f"  API Provider used: {api_target.upper()}")
     print(f"  Total files attempted: {len(args.questions_files)}")
     print(f"  Files processed successfully: {files_processed_count}")
