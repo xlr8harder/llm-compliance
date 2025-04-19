@@ -19,33 +19,35 @@ TRANSIENT_FAILURE_MARKER = object() # Use a unique object marker
 PROGRESS_COUNTER = 0
 PROGRESS_LOCK = threading.Lock()
 # Define valid provider names
-VALID_PROVIDERS = ["openai", "openrouter", "fireworks", "chutes"]
+VALID_PROVIDERS = ["openai", "openrouter", "fireworks", "chutes", "google"]
 
 # --- API Endpoint Constants ---
 OPENAI_API_BASE = "https://api.openai.com/v1"
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 FIREWORKS_API_BASE = "https://api.fireworks.ai/inference/v1"
 CHUTES_API_BASE = "https://llm.chutes.ai/v1"
+GOOGLE_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 # --- Helper Functions for Identifying Response Types ---
 def is_permanent_api_error(resp):
     """Checks if the response structure indicates a permanent error reported by the API provider."""
-    # This function seems generic enough for OpenAI, OpenRouter, Fireworks, Chutes errors
+    # This function relies on the standardized 'response' field structure.
+    # Google responses are adapted to this format before this check.
     try:
-        # Case 1: Error within choices (e.g., content filter)
+        # Case 1: Error within choices (e.g., content filter, safety block)
         if (isinstance(resp, dict) and
             "choices" in resp and
             isinstance(resp["choices"], list) and
             len(resp["choices"]) > 0 and
             isinstance(resp["choices"][0], dict) and
-            "error" in resp["choices"][0] and # Check if 'error' key exists
-             resp["choices"][0]["error"] is not None): # Check if error value is not None
+            "error" in resp["choices"][0] and
+             resp["choices"][0]["error"] is not None):
             return True
         # Case 2: Top-level error (common for auth, rate limits AFTER retries, invalid request)
         if (isinstance(resp, dict) and
             "error" in resp and
-            isinstance(resp["error"], (dict, str)) and resp["error"] and # Error is present and not empty/None
-            "choices" not in resp): # Often indicates request didn't get to model completion stage
+            isinstance(resp["error"], (dict, str)) and resp["error"] and
+            "choices" not in resp):
              return True
     except (TypeError, KeyError, IndexError):
         # Malformed response might indicate an error, but hard to classify as permanent *here*.
@@ -55,6 +57,7 @@ def is_permanent_api_error(resp):
 
 def is_empty_content_response(resp):
     """Checks if a response object is structurally valid but has empty content."""
+    # This function relies on the standardized 'response' field structure.
     try:
         if (isinstance(resp, dict) and
             "choices" in resp and
@@ -161,6 +164,7 @@ def cleanup_permanent_errors(output_file):
                     try:
                         entry = json.loads(stripped_line)
                         # Check for required fields before processing
+                        # The 'response' field should hold the standardized structure
                         response_data = entry.get("response")
                         question_id = entry.get("question_id")
 
@@ -174,7 +178,8 @@ def cleanup_permanent_errors(output_file):
                             print(f"Warning: Line {lines_read} (QID: {question_id}) missing 'response' data during cleanup, skipping.")
                             continue # Skip this line
 
-                        # Now check the content of the response
+                        # Now check the content of the response using the helper functions
+                        # which expect the standardized format
                         is_api_error = is_permanent_api_error(response_data)
                         is_empty = is_empty_content_response(response_data)
 
@@ -184,6 +189,7 @@ def cleanup_permanent_errors(output_file):
                             empty_skipped += 1
                         else:
                              # Add a check for basic success structure before keeping
+                             # This still checks the standardized 'response' field
                              if (isinstance(response_data, dict) and
                                  "choices" in response_data and
                                  isinstance(response_data["choices"], list) and
@@ -257,7 +263,7 @@ def cleanup_permanent_errors(output_file):
 
 # --- API Interaction ---
 
-def retry_with_backoff(func, api_provider_name, max_retries=8, initial_delay=1):
+def retry_with_backoff(func, question_id, api_provider_name, max_retries=8, initial_delay=1):
     """Retry a function with exponential backoff for transient errors."""
     retries = 0
     last_exception = None
@@ -267,15 +273,18 @@ def retry_with_backoff(func, api_provider_name, max_retries=8, initial_delay=1):
             # Check for non-200 responses that indicate permanent client errors
             if isinstance(result, dict):
                  status_code = result.get("status_code") # Check if make_request added this
-                 if status_code and status_code >= 400 and status_code not in [429, 500, 502, 503, 504]: # Add more retryable codes if needed
+                 # Non-retryable status codes (client errors, excluding 429)
+                 if status_code and 400 <= status_code < 500 and status_code != 429:
                     error_info = result.get("error", {})
-                    # Check for specific non-retryable error types if needed by provider
-                    if isinstance(error_info, dict) and error_info.get("type") == "invalid_request_error": # Example: OpenAI specific
-                         print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Permanent client error ({error_info.get('type', 'N/A')}). Not retrying.")
+                    # Specific non-retryable error types can be checked here if providers use them
+                    # e.g., OpenAI's 'invalid_request_error'
+                    if isinstance(error_info, dict) and error_info.get("type") == "invalid_request_error":
+                         print(f"\n[Thread-{threading.get_ident()}] QID {question_id}: {api_provider_name} API: Permanent client error ({error_info.get('type', 'N/A')}). Not retrying.")
                          return {"error": error_info}
+                    # Google might indicate permanent errors differently, but 4xx codes are a good general indicator
 
                     # Generic non-retryable client error
-                    print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Non-retryable client error ({status_code}). Treating as permanent failure.")
+                    print(f"\n[Thread-{threading.get_ident()}] QID {question_id}: {api_provider_name} API: Non-retryable client error ({status_code}). Treating as permanent failure.")
                     return {"error": result.get("error_detail", f"Permanent Client Error {status_code}")}
 
             return result # Return successful response or result triggering exception below
@@ -285,17 +294,20 @@ def retry_with_backoff(func, api_provider_name, max_retries=8, initial_delay=1):
             last_exception = e
             retries += 1
             error_type_name = type(last_exception).__name__
+            error_details = str(last_exception)
+
+            # Add more details if it's a RequestException with a response
+            if isinstance(last_exception, RequestException) and last_exception.response is not None:
+                status = last_exception.response.status_code
+                body_snippet = last_exception.response.text[:200].replace('\n', ' ') # Limit snippet size
+                error_details = f"Status: {status}, Body: {body_snippet}..."
 
             if retries == max_retries:
-                print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Max retries ({max_retries}) reached. Final transient error: {error_type_name}: {str(last_exception)}.")
+                print(f"\n[Thread-{threading.get_ident()}] QID {question_id}: {api_provider_name} API: Max retries ({max_retries}) reached. Final transient error: {error_type_name}: {error_details}.")
                 return TRANSIENT_FAILURE_MARKER
 
-            # Decide if the caught exception is truly retryable
-            # RequestException (network, timeout, 5xx, 429 handled inside make_request) are retryable.
-            # ValueError (e.g., JSON decode on 200 OK) is potentially transient.
-            # JSONDecodeError is potentially transient.
-            # KeyError might indicate unexpected API response format change - might be transient or permanent, retry cautiously.
-            print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Attempt {retries}/{max_retries} failed ({error_type_name}). Retrying...")
+            # Log retry attempt with more details
+            print(f"\n[Thread-{threading.get_ident()}] QID {question_id}: {api_provider_name} API: Attempt {retries}/{max_retries} failed ({error_type_name}: {error_details}). Retrying...")
 
             base_delay = initial_delay * (2 ** (retries - 1))
             jitter = base_delay * 0.1
@@ -303,44 +315,154 @@ def retry_with_backoff(func, api_provider_name, max_retries=8, initial_delay=1):
             time.sleep(actual_delay)
 
     # Should not be reached if max_retries > 0
-    print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API: Exited retry loop unexpectedly.")
+    print(f"\n[Thread-{threading.get_ident()}] QID {question_id}: {api_provider_name} API: Exited retry loop unexpectedly.")
     return TRANSIENT_FAILURE_MARKER
 
 
-def ask_question(question, model_id, api_target, api_key):
+def adapt_google_response(google_response, model_id_used):
+    """Adapts a Google Gemini API response to the standard format and includes raw data."""
+    adapted = {
+        "id": None, # Google doesn't provide a standard ID for the completion itself
+        "object": "chat.completion", # Assume standard object type
+        "model": model_id_used, # Model used for the API call
+        "choices": [],
+        "usage": {},
+        "_raw_provider_response": google_response # Store the original response
+    }
+
+    try:
+        # Usage mapping
+        if 'usageMetadata' in google_response:
+            um = google_response['usageMetadata']
+            adapted['usage'] = {
+                'prompt_tokens': um.get('promptTokenCount'),
+                'completion_tokens': um.get('candidatesTokenCount'),
+                'total_tokens': um.get('totalTokenCount')
+            }
+
+        # Try to get the specific model version if available
+        if 'usageMetadata' in google_response and 'modelVersion' in google_response['usageMetadata']: # Correction: modelVersion seems to be peer to usageMetadata
+             pass # Keep original model_id_used if not found, maybe log warning?
+        elif 'modelVersion' in google_response: # Check top level as seen in example
+             adapted['model'] = google_response['modelVersion']
+
+
+        # Process candidates (usually just one)
+        if 'candidates' in google_response and isinstance(google_response['candidates'], list) and len(google_response['candidates']) > 0:
+            candidate = google_response['candidates'][0]
+            choice = {
+                "index": 0,
+                "message": {"role": "assistant", "content": ""}, # Initialize message
+                "finish_reason": None,
+                "logprobs": None # Not typically available in basic Google response
+            }
+
+            # Extract finish reason
+            finish_reason_raw = candidate.get('finishReason')
+            if finish_reason_raw:
+                # Map Google reasons to standard ones (simple mapping for now)
+                reason_map = {
+                    "STOP": "stop",
+                    "MAX_TOKENS": "length",
+                    "SAFETY": "content_filter", # Treat safety as content filter
+                    "RECITATION": "content_filter", # Treat recitation as content filter
+                    "OTHER": "error",
+                    "UNSPECIFIED": "error"
+                }
+                choice['finish_reason'] = reason_map.get(finish_reason_raw, finish_reason_raw.lower()) # Default to lowercase raw reason
+
+            # Extract content
+            if 'content' in candidate and 'parts' in candidate['content'] and isinstance(candidate['content']['parts'], list) and len(candidate['content']['parts']) > 0:
+                # Assuming the first part contains the main text response
+                choice['message']['content'] = candidate['content']['parts'][0].get('text', '')
+
+            # Handle safety/error finish reasons by adding an error object to the choice
+            if choice['finish_reason'] in ["content_filter", "error"]:
+                choice["error"] = {
+                    "message": f"Response stopped due to: {finish_reason_raw}",
+                    "type": choice['finish_reason'], # Use the mapped reason as type
+                    "code": finish_reason_raw # Store the original Google reason code
+                }
+                # Keep partial content if available when error/filtered
+                # choice['message']['content'] = choice['message']['content'] # Content is already extracted
+
+            adapted['choices'].append(choice)
+        # Handle cases where the prompt itself was blocked (no candidates)
+        elif 'promptFeedback' in google_response and google_response['promptFeedback'].get('blockReason'):
+             block_reason = google_response['promptFeedback']['blockReason']
+             safety_ratings = google_response['promptFeedback'].get('safetyRatings', [])
+             choice = {
+                 "index": 0,
+                 "message": {"role": "assistant", "content": ""}, # No content generated
+                 "finish_reason": "content_filter", # Treat prompt block as content filter
+                 "error": {
+                     "message": f"Prompt blocked due to: {block_reason}",
+                     "type": "content_filter",
+                     "code": block_reason,
+                     "param": "prompt", # Indicate the issue was with the prompt
+                     "safety_ratings": safety_ratings
+                 }
+             }
+             adapted['choices'].append(choice)
+        # Handle cases where response is missing candidates or content otherwise (treat as error)
+        elif not adapted['choices']:
+             adapted['error'] = {'message': 'Invalid response structure: Missing candidates or promptFeedback', 'type': 'invalid_response'}
+
+    except (KeyError, IndexError, TypeError, AttributeError) as e:
+        print(f"Error adapting Google response: {e}")
+        traceback.print_exc()
+        adapted['error'] = {'message': f'Failed to adapt Google response structure: {e}', 'type': 'adaptation_error'}
+        # Ensure choices list exists even if adaptation failed partially
+        if 'choices' not in adapted: adapted['choices']=[]
+
+
+    return adapted
+
+
+def ask_question(question, question_id, model_id, api_target, api_key):
     """Send a question to the specified API endpoint. Handles retries internally."""
     url = ""
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    data = {
-        "model": model_id, # The model_id is passed directly from args.model
-        "messages": [{"role": "user", "content": question}]
-        # Add other parameters like temperature, max_tokens here if needed globally
-        # "temperature": 0.7,
-        # "max_tokens": 1024,
-        # "stream": False # Assuming non-streaming for this script
-    }
+    headers = {"Content-Type": "application/json"} # Default header
+    data = {} # Payload varies by provider
     api_provider_name = api_target # Use lowercase target name directly
 
     # --- Configure API details based on target ---
     if api_target == "openai":
         url = f"{OPENAI_API_BASE}/chat/completions"
-        # No extra headers or data modifications needed for OpenAI usually
+        headers["Authorization"] = f"Bearer {api_key}"
+        data = {"model": model_id, "messages": [{"role": "user", "content": question}]}
 
     elif api_target == "openrouter":
         url = f"{OPENROUTER_API_BASE}/chat/completions"
+        headers["Authorization"] = f"Bearer {api_key}"
         headers["HTTP-Referer"] = os.getenv("OPENROUTER_REFERRER", "http://localhost")
         headers["X-Title"] = os.getenv("OPENROUTER_TITLE", "AI Question Answering Script")
+        data = {"model": model_id, "messages": [{"role": "user", "content": question}]}
 
     elif api_target == "fireworks":
         url = f"{FIREWORKS_API_BASE}/chat/completions"
-        # No extra headers or data modifications needed for Fireworks usually
+        headers["Authorization"] = f"Bearer {api_key}"
+        data = {"model": model_id, "messages": [{"role": "user", "content": question}]}
 
     elif api_target == "chutes":
         url = f"{CHUTES_API_BASE}/chat/completions"
-        # No extra headers or data modifications needed for Chutes based on example
+        headers["Authorization"] = f"Bearer {api_key}"
+        data = {"model": model_id, "messages": [{"role": "user", "content": question}]}
+
+    elif api_target == "google":
+        # Note: Google uses API key as query param, not Auth header
+        url = f"{GOOGLE_API_BASE}/models/{model_id}:generateContent?key={api_key}"
+        # Google uses a different payload structure
+        data = {"contents": [{"parts": [{"text": question}]}]}
+        # Example: Add safety settings if needed
+        # data["safetySettings"] = [
+        #     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        #     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        #     {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        #     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+        # ]
 
     else:
-        # Should not happen if main logic is correct due to mandatory --provider
         print(f"ERROR: Unknown api_target '{api_target}' in ask_question.")
         return {"error": {"message": f"Internal configuration error: Unknown API target '{api_target}'", "code": "config_error"}}
 
@@ -352,61 +474,90 @@ def ask_question(question, model_id, api_target, api_key):
         if response.status_code != 200:
             status_code = response.status_code
             error_details = f"Status Code: {status_code}"
-            error_json = None
+            error_json_payload = None # Holds the structured error from the response body
+            raw_response_body = response.text # Keep raw body for details
+
             try:
                 resp_json = response.json()
-                if 'error' in resp_json:
-                    error_json = resp_json['error']
-                    error_msg = str(error_json.get('message', error_json)) if isinstance(error_json, dict) else str(error_json)
-                else:
-                    error_msg = str(resp_json) # Fallback if no 'error' key
+                # Google errors are often under an 'error' key
+                if 'error' in resp_json and isinstance(resp_json['error'], dict):
+                    error_json_payload = resp_json['error']
+                    error_msg = error_json_payload.get('message', str(resp_json))
+                else: # Fallback for other providers or unexpected Google errors
+                    error_json_payload = resp_json.get('error', resp_json) # Take 'error' if present, else whole body
+                    error_msg = str(error_json_payload.get('message', error_json_payload)) if isinstance(error_json_payload, dict) else str(error_json_payload)
+
                 error_details += f", Body: {error_msg}"
+                # Store raw json if parsing succeeded
+                raw_response_body = resp_json
+
             except json.JSONDecodeError:
-                error_details += f", Body (non-JSON): {response.text[:500]}"
-            except Exception:
-                 error_details += f", Body (error parsing): {response.text[:500]}"
+                error_details += f", Body (non-JSON): {raw_response_body[:500]}"
+            except Exception as parse_exc:
+                 error_details += f", Body (error parsing): {type(parse_exc).__name__} - {raw_response_body[:500]}"
 
             # --- Classify error for retry/failure ---
+            # Raise RequestException for retryable errors (5xx, 429)
+            # Include the response object in the exception for better logging in retry_with_backoff
             if status_code >= 500 or status_code == 429:
-                raise RequestException(f"Retryable {api_provider_name} server/rate limit error: {error_details}")
+                raise RequestException(f"Retryable {api_provider_name} server/rate limit error: {error_details}", response=response)
+
             # Specific non-retryable client errors (e.g., OpenAI invalid request)
-            elif isinstance(error_json, dict) and error_json.get("type") == "invalid_request_error":
-                 return {"status_code": status_code, "error": error_json, "error_detail": error_details}
+            elif isinstance(error_json_payload, dict) and error_json_payload.get("type") == "invalid_request_error":
+                 # Pass the structured error and details up
+                 return {"status_code": status_code, "error": error_json_payload, "error_detail": error_details, "_raw_provider_response": raw_response_body}
             # Other client errors (4xx except 429) - treat as permanent
             else:
-                 print(f"\n[Thread-{threading.get_ident()}] {api_provider_name} API Client error: {error_details}. Treating as permanent failure.")
-                 error_payload = error_json if error_json else {"message": f"Permanent Client Error: {error_details}", "code": status_code}
-                 if not isinstance(error_payload, (dict, str)): # Ensure error is dict or string
-                     error_payload = {"message": str(error_payload), "code": status_code}
-                 return {"status_code": status_code, "error": error_payload, "error_detail": error_details}
+                 print(f"\n[Thread-{threading.get_ident()}] QID {question_id}: {api_provider_name} API Client error: {error_details}. Treating as permanent failure.")
+                 # Ensure we return a standard error structure
+                 if not isinstance(error_json_payload, (dict, str)):
+                      error_json_payload = {"message": f"Permanent Client Error: {error_details}", "code": status_code}
+                 return {"status_code": status_code, "error": error_json_payload, "error_detail": error_details, "_raw_provider_response": raw_response_body}
 
         # --- Handle successful 200 OK response ---
         try:
-            response_data = response.json()
-            if not isinstance(response_data, dict):
-                raise ValueError(f"Unexpected {api_provider_name} response format (not dict): {type(response_data)}")
-            # Add internal metadata for logging
-            response_data["_provider_used"] = api_provider_name # Log the provider used (lowercase)
-            response_data["_model_used_for_api"] = model_id # Log the model name sent to API
-            return response_data
+            raw_response_data = response.json() # Get the raw JSON data
+            if not isinstance(raw_response_data, dict):
+                raise ValueError(f"Unexpected {api_provider_name} response format (not dict): {type(raw_response_data)}")
+
+            # Adapt response based on provider
+            if api_target == 'google':
+                adapted_response = adapt_google_response(raw_response_data, model_id)
+                # Add internal metadata needed by calling functions
+                adapted_response["_provider_used"] = api_provider_name
+                adapted_response["_model_used_for_api"] = model_id
+                return adapted_response
+            else:
+                # For other providers, assume standard format and just add metadata
+                raw_response_data["_provider_used"] = api_provider_name
+                raw_response_data["_model_used_for_api"] = model_id
+                # Store raw response for consistency, though it's the same as the main body here
+                raw_response_data["_raw_provider_response"] = raw_response_data.copy()
+                return raw_response_data
+
         except json.JSONDecodeError as e:
+            # Raise ValueError for retry logic to catch potentially transient decode issue
             raise ValueError(f"Failed to decode {api_provider_name} JSON on 200 OK: {e}. Response: {response.text[:500]}")
         except Exception as e:
-             raise ValueError(f"Error processing successful {api_provider_name} response: {type(e).__name__}: {e}")
+             # Raise ValueError for retry logic for other adaptation errors
+             raise ValueError(f"Error processing/adapting successful {api_provider_name} response: {type(e).__name__}: {e}")
 
 
     # --- Execute with retry logic ---
-    return retry_with_backoff(make_request, api_provider_name)
+    return retry_with_backoff(make_request, question_id, api_provider_name)
 
 # --- Worker Function ---
 def process_single_question_worker(question_data, model_id, api_target, api_key):
     """Worker function to process a single question using the determined API target."""
+    question_id = question_data.get('id', '[Missing ID]') # Get question ID here
     response = ask_question(
         question_data.get('question', '[Missing Question]'),
+        question_id, # Pass question_id to ask_question
         model_id,
         api_target,
         api_key
         )
+    # Response dict may contain standard fields AND '_raw_provider_response'
     return question_data, response
 
 # --- Main Processing Logic ---
@@ -491,29 +642,33 @@ def process_questions(questions_file, model_id, canonical_name, api_target, api_
     start_time = time.time()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+        # Pass all required arguments to the worker
         futures = [executor.submit(process_single_question_worker, q_data, model_id, api_target, api_key)
                    for q_data in questions_to_process]
 
         for future in concurrent.futures.as_completed(futures):
             try:
-                question_data, response = future.result()
+                question_data, response_dict = future.result()
                 question_id = question_data.get('id', '[Missing ID]')
                 questions_processed_this_run += 1
 
-                # Extract metadata added by ask_question, using fallbacks if it failed early
-                provider_used = response.get("_provider_used", api_target) if isinstance(response, dict) else api_target # Use lowercase target as fallback
-                model_used_for_api = response.get("_model_used_for_api", model_id) if isinstance(response, dict) else model_id # Use input model_id as fallback
-
-                # Clean up internal fields from the response object before logging
-                if isinstance(response, dict):
-                    response.pop("_provider_used", None)
-                    response.pop("_model_used_for_api", None)
+                # Extract metadata and raw response if present
+                provider_used = response_dict.get("_provider_used", api_target) if isinstance(response_dict, dict) else api_target
+                model_used_for_api = response_dict.get("_model_used_for_api", model_id) if isinstance(response_dict, dict) else model_id
+                raw_provider_response = None
+                if isinstance(response_dict, dict):
+                    raw_provider_response = response_dict.pop("_raw_provider_response", None)
+                    # Clean up internal fields from the main response object before logging
+                    response_dict.pop("_provider_used", None)
+                    response_dict.pop("_model_used_for_api", None)
 
                 # --- Handle response ---
-                if response is TRANSIENT_FAILURE_MARKER:
+                if response_dict is TRANSIENT_FAILURE_MARKER:
                     questions_failed_transiently_this_run += 1
-                    print(f"  QID {question_id}: Transient failure using {provider_used}, will retry later.")
+                    # Logging for transient failure is handled within retry_with_backoff
+                    # print(f"  QID {question_id}: Transient failure using {provider_used}, will retry later.") # Removed duplicate log
                 else:
+                    # 'response_dict' contains the potentially adapted response structure
                     output_entry = {
                         "question_id": question_id,
                         "category": question_data.get('category'),
@@ -522,8 +677,12 @@ def process_questions(questions_file, model_id, canonical_name, api_target, api_
                         "api_provider": provider_used, # Log the provider used (lowercase)
                         "api_model": model_used_for_api, # Log model name sent to API
                         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        "response": response # Contains the full API response (or error structure)
+                        "response": response_dict # Log the standardized (or original if non-Google) response
                     }
+                    # Add raw response if it was extracted (primarily for Google)
+                    if raw_provider_response is not None:
+                         output_entry["raw_response"] = raw_provider_response
+
                     if 'domain' in question_data:
                         output_entry['domain'] = question_data['domain']
 
@@ -577,15 +736,13 @@ def process_questions(questions_file, model_id, canonical_name, api_target, api_
 # --- Main Execution ---
 def main():
     parser = argparse.ArgumentParser(
-        description='Ask questions via API in parallel, supporting multiple providers (OpenAI, OpenRouter, FireworksAI, Chutes), with retries for transient errors. Logs successes and permanent errors.',
+        description='Ask questions via API in parallel, supporting multiple providers (OpenAI, OpenRouter, FireworksAI, Chutes, Google), with retries for transient errors. Logs successes and permanent errors.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    # Adjusted model help text
-    parser.add_argument('model', help='Model identifier specific to the chosen API provider (e.g., "gpt-4o", "google/gemini-1.5-flash", "accounts/fireworks/models/llama-v3p1-405b-instruct", "THUDM/GLM-4-32B-0414")')
+    parser.add_argument('model', help='Model identifier specific to the chosen API provider (e.g., "gpt-4o", "google/gemini-1.5-flash", "accounts/fireworks/models/llama-v3p1-405b-instruct", "THUDM/GLM-4-32B-0414", "gemini-1.0-pro")')
     parser.add_argument('questions_files', nargs='+', help='One or more JSONL question files (must contain "id" and "question" fields).')
-    # Modified provider argument
     parser.add_argument('--provider', choices=VALID_PROVIDERS, required=True, help='MANDATORY: Specify the API provider to use.')
     parser.add_argument('--canonical-name', help='Optional canonical name for the model used in the output file name and logs (if different from the API model name).')
-    parser.add_argument('-w', '--workers', type=int, default=4, help='Number of parallel worker threads for API requests.') # Sensible default > 1
+    parser.add_argument('-w', '--workers', type=int, default=4, help='Number of parallel worker threads for API requests.')
     parser.add_argument('--force-restart', action='store_true', help='Delete existing output file and start fresh (overrides --force-retry-permanent-errors).')
     parser.add_argument('--force-retry-permanent-errors', '--frpe', action='store_true', help='Remove logged permanent errors from the output file before starting, forcing retry.')
 
@@ -616,8 +773,11 @@ def main():
         api_key = os.getenv('FIREWORKS_API_KEY')
         env_var_used = 'FIREWORKS_API_KEY'
     elif api_target == "chutes":
-        api_key = os.getenv('CHUTES_API_KEY') # Use CHUTES_API_TOKEN as per example
-        env_var_used = 'CHUTES_API_KEY'
+        api_key = os.getenv('CHUTES_API_TOKEN') # Use CHUTES_API_TOKEN for chutes
+        env_var_used = 'CHUTES_API_TOKEN'
+    elif api_target == "google":
+        api_key = os.getenv('GEMINI_API_KEY') # Use GEMINI_API_KEY for google
+        env_var_used = 'GEMINI_API_KEY'
     else:
         # Safeguard, though argparse choices should prevent this
         print(f"Error: Internal error - Invalid provider '{api_target}' selected.")

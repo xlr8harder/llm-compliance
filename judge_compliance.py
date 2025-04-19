@@ -23,15 +23,16 @@ PROGRESS_COUNTER = 0
 PROGRESS_LOCK = threading.Lock()
 
 # --- Global Cache for OpenAI Models (Used for JUDGE model) ---
-OPENAI_MODELS_CACHE = None
-OPENAI_MODELS_CHECK_DONE = False
-OPENAI_MODELS_LOCK = threading.Lock()
+# Cache logic removed as we default to OpenRouter for the judge
+# OPENAI_MODELS_CACHE = None
+# OPENAI_MODELS_CHECK_DONE = False
+# OPENAI_MODELS_LOCK = threading.Lock()
 
 # --- API Endpoint Constants ---
+# Assuming OpenRouter is the primary target for the Judge model
 OPENAI_API_BASE =     "https://openrouter.ai/api/v1"
-#OPENAI_API_BASE = "https://api.openai.com/v1"
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
-# Fireworks not typically used for judging, but keep base URL if needed later
+# Fireworks not typically used for judging
 # FIREWORKS_API_BASE = "https://api.fireworks.ai/inference/v1"
 
 # --- Helper Functions ---
@@ -104,13 +105,10 @@ def load_responses(file_path):
 
                     # --- Optional Field Check (Good for metadata, but don't skip) ---
                     if 'category' not in entry:
-                        # print(f"Debug: Line {line_number} (QID: {entry.get('question_id')}) missing optional 'category'.")
                         warnings_missing_optional +=1
-                    if 'model_requested' not in entry:
-                        # print(f"Debug: Line {line_number} (QID: {entry.get('question_id')}) missing optional 'model_requested'.")
+                    if 'model' not in entry: # Check for 'model' (canonical name or original)
                         warnings_missing_optional +=1
-                    if 'api_provider' not in entry:
-                         # print(f"Debug: Line {line_number} (QID: {entry.get('question_id')}) missing optional 'api_provider'.")
+                    if 'api_provider' not in entry: # Check for original provider
                          warnings_missing_optional +=1
 
                     responses.append(entry)
@@ -118,7 +116,7 @@ def load_responses(file_path):
 
         if skipped_missing_core > 0:
             print(f"Skipped {skipped_missing_core} lines due to missing core fields (question_id, question, response).")
-        # if warnings_missing_optional > 0:
+        # if warnings_missing_optional > 0: # Uncomment if detailed warnings needed
         #     print(f"Issued {warnings_missing_optional} warnings for missing optional metadata fields.")
 
         if valid_count == 0 and skipped_missing_core > 0:
@@ -155,7 +153,6 @@ def load_existing_analyses(output_file):
                 question_id = entry.get("question_id")
                 if question_id:
                     # Consider an entry processed if it exists, regardless of 'compliance' status
-                    # This assumes we don't want to re-judge recorded errors unless --force-restart
                     processed_ids.add(question_id)
                 else:
                     print(f"Warning: Line {lines_read} in analysis file missing 'question_id'. Skipping.")
@@ -173,65 +170,65 @@ def load_existing_analyses(output_file):
         print(f"  - Warnings during loading: {parse_warnings}")
     return processed_ids
 
-def get_model_response_text(entry):
-    """Extract the actual response text from the API response data in the input entry. Returns None if invalid or error."""
+def get_model_response_text_and_finish_reason(entry):
+    """
+    Extract the response text and finish reason from the API response data.
+    Returns (text, finish_reason) tuple.
+    Returns (None, None) if response invalid, error, or content not found.
+    Returns (text, "error") if finish_reason itself is "error".
+    """
+    response_text = None
+    finish_reason = None
     try:
         response_field = entry.get('response')
         if not isinstance(response_field, dict):
-             return None
+             return None, None # Invalid structure
+
+        # Check for top-level error first (often indicates request didn't complete)
         if 'error' in response_field and response_field['error']:
-            return None
+            # We might still have choices if it was a partial error, but treat top-level as definitive error
+            return None, "error" # Indicate error, no valid text likely
+
         choices = response_field.get('choices')
         if isinstance(choices, list) and len(choices) > 0:
             first_choice = choices[0]
             if isinstance(first_choice, dict):
+                # Get finish_reason first, it's important even if content is missing/filtered
+                finish_reason = first_choice.get('finish_reason')
+
+                # Check for explicit error *within* the choice
                 if 'error' in first_choice and first_choice['error']:
-                     return None
+                     # Content might be partial or empty, but the choice itself signals an error
+                     # Return existing content (if any) but mark finish_reason as error
+                     message = first_choice.get('message')
+                     if isinstance(message, dict):
+                         response_text = message.get('content')
+                     return response_text, "error" # Prioritize error status
+
+                # If no explicit error in choice, extract content normally
                 message = first_choice.get('message')
                 if isinstance(message, dict):
                     content = message.get('content')
-                    return content if isinstance(content, str) else None
-    except (KeyError, IndexError, TypeError):
-        pass
-    return None
+                    # Ensure content is a string, even if empty
+                    response_text = content if isinstance(content, str) else None
+
+    except (KeyError, IndexError, TypeError, AttributeError) as e:
+        print(f"Warning: Error parsing response structure for QID {entry.get('question_id')}: {e}")
+        pass # Fall through to return None, None
+
+    # Return extracted text and reason (which might be None if not found)
+    return response_text, finish_reason
+
 
 def get_original_provider_from_entry(entry):
     """Safely extract the original API provider from the ask.py output entry."""
-    # Use .get for safe access, default to 'Unknown' if key missing
-    return entry.get('api_provider', "Unknown")
+    # Check both potential keys used over time ('api_provider' or 'original_api_provider')
+    return entry.get('original_api_provider', entry.get('api_provider', "Unknown"))
 
 
 # --- API Interaction & Retry Logic (Specific to JUDGE API) ---
 
-def get_openai_models(api_key):
-    """Fetches the list of available models from the OpenAI API (for judge model check)."""
-    global OPENAI_MODELS_CACHE, OPENAI_MODELS_CHECK_DONE
-    with OPENAI_MODELS_LOCK:
-        if OPENAI_MODELS_CHECK_DONE:
-            return OPENAI_MODELS_CACHE
-        print("Fetching available models from OpenAI API (for judge model selection)...")
-        headers = {"Authorization": f"Bearer {api_key}"}
-        try:
-            response = requests.get(f"{OPENAI_API_BASE}/models", headers=headers, timeout=30)
-            response.raise_for_status()
-            models_data = response.json()
-            model_ids = {model['id'] for model in models_data.get('data', []) if 'id' in model}
-            print(f"Found {len(model_ids)} models available via OpenAI API.")
-            OPENAI_MODELS_CACHE = model_ids
-            OPENAI_MODELS_CHECK_DONE = True
-            return OPENAI_MODELS_CACHE
-        except RequestException as e:
-            print(f"Warning: Error fetching OpenAI models: {e}")
-            print("Could not verify OpenAI models. Will fall back to OpenRouter for 'openai/' prefixed judge models.")
-            OPENAI_MODELS_CACHE = set()
-            OPENAI_MODELS_CHECK_DONE = True
-            return OPENAI_MODELS_CACHE
-        except Exception as e:
-            print(f"Warning: Unexpected error fetching OpenAI models: {type(e).__name__}: {e}")
-            traceback.print_exc()
-            OPENAI_MODELS_CACHE = set()
-            OPENAI_MODELS_CHECK_DONE = True
-            return OPENAI_MODELS_CACHE
+# Function get_openai_models removed as it's no longer needed for judge selection
 
 
 def retry_with_backoff(func, api_provider_name, max_retries=8, initial_delay=1):
@@ -275,15 +272,15 @@ def call_judge_api(prompt, judge_model_id, judge_api_target, judge_api_key):
     url = ""
     headers = {"Authorization": f"Bearer {judge_api_key}", "Content-Type": "application/json"}
     data = {"messages": [{"role": "user", "content": prompt}]}
-    api_provider_name = f"{judge_api_target.upper()} Judge"
+    api_provider_name = f"{judge_api_target.upper()} Judge" # Label for logging
 
-    if judge_api_target == "openai":
+    if judge_api_target == "openai": # This target might still be valid if OPENAI_API_KEY is set and points elsewhere
         model_name_for_api = judge_model_id.split('/')[-1] if '/' in judge_model_id else judge_model_id
-        url = f"{OPENAI_API_BASE}/chat/completions"
+        url = f"{OPENAI_API_BASE}/chat/completions" # Uses the constant defined at top
         data["model"] = model_name_for_api
     elif judge_api_target == "openrouter":
-        url = f"{OPENROUTER_API_BASE}/chat/completions"
-        data["model"] = judge_model_id
+        url = f"{OPENROUTER_API_BASE}/chat/completions" # Uses the constant defined at top
+        data["model"] = judge_model_id # OpenRouter uses full model ID
         headers["HTTP-Referer"] = os.getenv("OPENROUTER_REFERRER", "http://localhost") # Keep OpenRouter headers
         headers["X-Title"] = os.getenv("OPENROUTER_TITLE", "Compliance Judging Script")
     else:
@@ -301,7 +298,7 @@ def call_judge_api(prompt, judge_model_id, judge_api_target, judge_api_key):
             try:
                 resp_json = response.json()
                 error_json_body = resp_json # Store the whole body for potential details
-                error_msg = resp_json.get('error', {}).get('message', str(resp_json))
+                error_msg = str(resp_json.get('error', {}).get('message', resp_json)) # More robust extraction
                 error_details += f", Body: {error_msg}"
             except json.JSONDecodeError:
                 error_details += f", Body (non-JSON): {response.text[:500]}"
@@ -313,7 +310,7 @@ def call_judge_api(prompt, judge_model_id, judge_api_target, judge_api_key):
             else: # Treat other 4xx as permanent for the judge call
                  # Return dict for retry_with_backoff to identify as permanent
                  # Pass the full error JSON if available, otherwise construct one
-                 error_payload = error_json_body if error_json_body else {"message": f"Permanent Client Error: {error_details}", "code": status_code}
+                 error_payload = error_json_body if isinstance(error_json_body, dict) else {"message": f"Permanent Client Error: {error_details}", "code": status_code}
                  return {"status_code": status_code, "error": error_payload, "error_detail": error_details} # Pass detail separately if needed
         try:
             response_data = response.json()
@@ -339,7 +336,6 @@ def judge_single_response_worker(entry, judge_model_id, judge_api_target, judge_
     """
     question_id = entry.get("question_id", "[Missing ID]")
     question = entry.get('question', '[Missing Question]')
-    response_text = get_model_response_text(entry)
 
     # --- Prepare result structure ---
     analysis_result = {
@@ -350,15 +346,25 @@ def judge_single_response_worker(entry, judge_model_id, judge_api_target, judge_
         "raw_judge_response": None,
     }
 
-    # --- Handle cases where judging isn't possible ---
-    if response_text is None:
-        analysis_result["judge_analysis"] = "Original response data invalid, contained an error, or content was not found."
+    # --- Extract response text and finish reason FIRST ---
+    response_text, finish_reason = get_model_response_text_and_finish_reason(entry)
+
+    # --- Handle cases where judging isn't possible or needed ---
+    # Case 1: Original response indicated an error via finish_reason
+    if finish_reason == "error":
+        analysis_result["judge_analysis"] = f"Original response had finish_reason 'error'. Treating as API error. Partial text: '{str(response_text)[:100]}...'"
         analysis_result["compliance"] = "ERROR_ORIGINAL_RESPONSE"
-        print(entry)
-        print(analysis_result)
+        # print(f"QID {question_id}: Marked as ERROR_ORIGINAL_RESPONSE due to finish_reason='error'.")
+        return entry, analysis_result # Return immediately, skip judging
+
+    # Case 2: Original response structure invalid or content missing (and not already caught by finish_reason)
+    if response_text is None:
+        analysis_result["judge_analysis"] = "Original response data invalid, contained an error (not finish_reason), or content was not found."
+        analysis_result["compliance"] = "ERROR_ORIGINAL_RESPONSE"
+        # print(f"QID {question_id}: Marked as ERROR_ORIGINAL_RESPONSE due to missing text/invalid structure.")
         return entry, analysis_result # Return immediately
 
-    # --- Proceed with judging ---
+    # --- Proceed with judging (only if response seems valid so far) ---
     judge_prompt = create_judge_prompt(question, response_text)
     judge_api_response = None
     compliance_status_from_judge = "INVALID_FORMAT" # Status of judge's *response format*
@@ -377,8 +383,7 @@ def judge_single_response_worker(entry, judge_model_id, judge_api_target, judge_
         # --- Handle Judge API Call Results ---
         if judge_api_response is TRANSIENT_FAILURE_MARKER:
             # Propagate transient failure marker up
-            print(judge_api_response)
-            print(f"[Worker] QID {question_id}: Judging failed transiently after retries via {judge_api_target.upper()}.")
+            # print(f"[Worker] QID {question_id}: Judging failed transiently after retries via {judge_api_target.upper()}.")
             return entry, TRANSIENT_FAILURE_MARKER
 
         if isinstance(judge_api_response, dict) and 'error' in judge_api_response:
@@ -387,9 +392,7 @@ def judge_single_response_worker(entry, judge_model_id, judge_api_target, judge_
             analysis_result["judge_analysis"] = error_msg
             analysis_result["compliance"] = "ERROR_JUDGE_API"
             analysis_result["raw_judge_response"] = str(judge_api_response)
-            print(judge_api_response)
-            print(analysis_result)
-            print(f"[Worker] QID {question_id}: {error_msg}")
+            # print(f"[Worker] QID {question_id}: {error_msg}")
             # Return the error status - main loop handles 'fatal' policy
             return entry, analysis_result
 
@@ -430,8 +433,6 @@ def judge_single_response_worker(entry, judge_model_id, judge_api_target, judge_
                      print(f"[Worker] QID {question_id}: {error_msg}")
                      analysis_result["judge_analysis"] += f"\n\nERROR: {error_msg}"
                      analysis_result["compliance"] = "ERROR_JUDGE_FORMAT"
-                     print(judge_api_response)
-                     print(analysis_result)
                      # loop will terminate
 
         except (KeyError, IndexError, TypeError, AttributeError) as e:
@@ -441,8 +442,6 @@ def judge_single_response_worker(entry, judge_model_id, judge_api_target, judge_
             analysis_result["judge_analysis"] = error_msg
             analysis_result["compliance"] = "ERROR_JUDGE_PARSE"
             analysis_result["raw_judge_response"] = str(judge_api_response)
-            print(judge_api_response)
-            print(analysis_result)
             # Break the loop as we can't parse this response
             break
 
@@ -559,9 +558,10 @@ def process_responses_file(response_file_path, judge_model_id, judge_api_target,
                         compliance_status = analysis_result.get("compliance", "ERROR_UNKNOWN")
 
                         # --- Apply FATAL error policy for Judging Errors ---
-                        is_error = compliance_status.startswith("ERROR_")
-                        if is_error:
-                            print(analysis_result)
+                        # Check if the compliance status itself indicates an error from the *judging* process
+                        is_judging_error = compliance_status.startswith("ERROR_JUDGE_") or compliance_status == "ERROR_UNKNOWN"
+
+                        if is_judging_error:
                             tasks_failed_permanently += 1
                             error_msg = analysis_result.get('judge_analysis', 'Unknown judging error')
                             error_code = compliance_status
@@ -571,22 +571,27 @@ def process_responses_file(response_file_path, judge_model_id, judge_api_target,
                             # Raise runtime error to stop processing this file
                             raise RuntimeError(f"Fatal judging error ({error_code}) for QID {question_id}")
                         else:
-                            # --- Log Successful Analysis ---
+                            # --- Log Successful Analysis or Pre-Identified Original Error ---
+                            # The compliance status will be COMPLETE/EVASIVE/DENIAL or ERROR_ORIGINAL_RESPONSE
                             output_entry = {**original_entry} # Start with all original data
                             # Add/overwrite with analysis results
                             output_entry.update(analysis_result)
                             # Ensure required judge keys are present from analysis_result
                             output_entry['judge_model'] = analysis_result.get('judge_model', judge_model_id)
                             output_entry['judge_api_provider'] = analysis_result.get('judge_api_provider', judge_api_target.upper())
-                            output_entry['compliance'] = analysis_result.get('compliance') # Should be COMPLETE/EVASIVE/DENIAL here
+                            output_entry['compliance'] = compliance_status # This is the key field
                             output_entry['judge_analysis'] = analysis_result.get('judge_analysis')
                             output_entry['raw_judge_response'] = analysis_result.get('raw_judge_response')
-                            output_entry['model'] = original_entry.get('model')
+                            # Ensure model field from original entry is preserved if canonical_name was used
+                            if 'model' not in output_entry and 'model' in original_entry:
+                                output_entry['model'] = original_entry.get('model')
 
                             # Rename original provider field for clarity in output JSON
-                            if 'api_provider' in output_entry:
-                                 output_entry['original_api_provider'] = output_entry.pop('api_provider')
-
+                            # Use the safer extraction function
+                            orig_provider = get_original_provider_from_entry(original_entry)
+                            output_entry['original_api_provider'] = orig_provider
+                            # Remove the old keys if they exist to avoid confusion
+                            output_entry.pop('api_provider', None)
 
                             try:
                                 with output_lock:
@@ -638,9 +643,9 @@ def process_responses_file(response_file_path, judge_model_id, judge_api_target,
     print(f"  Total valid entries loaded: {total_valid_responses}")
     print(f"  Tasks submitted this run: {num_to_process}")
     print(f"  Tasks completed by workers: {tasks_processed_this_run}")
-    print(f"  Analyses logged this run: {tasks_logged_this_run}") # Only successful logs
+    print(f"  Analyses logged this run: {tasks_logged_this_run}") # Includes ERROR_ORIGINAL_RESPONSE logs
     print(f"  Tasks failed transiently (judge API retry failed): {tasks_failed_transiently}")
-    # Permanent failures are only those caught and deemed fatal
+    # Permanent failures are only those caught and deemed fatal (judging errors)
     print(f"  Tasks failed permanently (judging error/fatal): {tasks_failed_permanently}")
     print(f"  Processing duration: {duration:.2f} seconds")
     final_logged_ids = load_existing_analyses(output_file) # Reload to be sure
@@ -677,42 +682,15 @@ def main():
 
 
     # --- Determine Judge API Target and Key ---
+    # Defaulting to OpenRouter for the judge model
     judge_model_id = JUDGE_MODEL
-    judge_api_target = ""
-    judge_api_key = None
-    judge_env_var_used = ""
-
-    #if judge_model_id.startswith('openai/'):
-        #print(f"Judge model '{judge_model_id}' starts with 'openai/'. Checking availability...")
-        #openai_key = os.getenv('OPENAI_API_KEY')
-        #if not openai_key:
-            #print("Warning: OPENAI_API_KEY environment variable not set.")
-            #print("Attempting fallback to OpenRouter for the judge model...")
-            #judge_api_target = "openrouter"
-            #judge_api_key = os.getenv('OPENROUTER_API_KEY')
-            #judge_env_var_used = 'OPENROUTER_API_KEY'
-        #else:
-            #available_openai_models = get_openai_models(openai_key)
-            #openai_model_name_only = judge_model_id.split('/')[-1]
-            #if openai_model_name_only in available_openai_models:
-                #print(f"Judge model '{openai_model_name_only}' found in OpenAI API. Using OpenAI for judging.")
-                #judge_api_target = "openai"
-                #judge_api_key = openai_key
-                #judge_env_var_used = 'OPENAI_API_KEY'
-            #else:
-                #print(f"Judge model '{openai_model_name_only}' not found in available OpenAI models.")
-                #print("Attempting fallback to OpenRouter for judging...")
-                #judge_api_target = "openrouter"
-                #judge_api_key = os.getenv('OPENROUTER_API_KEY')
-                #judge_env_var_used = 'OPENROUTER_API_KEY'
-    #else:
-    print(f"Judge model '{judge_model_id}' does not start with 'openai/'. Assuming OpenRouter for judging.")
     judge_api_target = "openrouter"
     judge_api_key = os.getenv('OPENROUTER_API_KEY')
     judge_env_var_used = 'OPENROUTER_API_KEY'
+    print(f"Judge model '{judge_model_id}' will use OpenRouter for judging.")
 
     if not judge_api_key:
-        print(f"Error: Required API key environment variable '{judge_env_var_used}' is not set for the determined judge API target '{judge_api_target.upper()}'.")
+        print(f"Error: Required API key environment variable '{judge_env_var_used}' is not set for the judge API target '{judge_api_target.upper()}'.")
         sys.exit(1)
 
     # --- Print Configuration ---
@@ -752,18 +730,16 @@ def main():
              print(f"FATAL Error loading/reading {response_file}: {e}")
              files_failed_count += 1
              exit_status = 1
-             # Decide whether to break or continue with next file
-             # break
+             # Continue with next file by default
         except RuntimeError as e:
              # Handle fatal errors raised during processing (judging error, write error, restart error)
              print(f"FATAL Error during processing of {response_file}: {e}")
              files_failed_count += 1
              exit_status = 1
-             # Decide whether to break or continue
-             # break
+             # Continue with next file by default
         except KeyboardInterrupt:
              print("\nInterrupted by user. Exiting overall process.")
-             files_failed_count += 1
+             files_failed_count += (len(args.response_files) - files_processed_count) # Mark remaining as failed
              exit_status = 1
              break # Exit loop over files
         except Exception as e:
@@ -773,14 +749,15 @@ def main():
             print(f"\n!!! CRITICAL UNEXPECTED ERROR processing {response_file} !!!")
             print(f"Error: {type(e).__name__}: {str(e)}")
             traceback.print_exc()
-            # Decide whether to break or continue
-            # break
+            # Continue with next file by default
 
         file_end_time = time.time()
-        # Print finished message only if no fatal error occurred for this file
-        if exit_status == 0 or files_failed_count == files_processed_count: # Check if current file caused failure
+        # Print finished message only if no fatal error occurred *for this file*
+        # This relies on exceptions being raised correctly
+        if exit_status == 0 or files_failed_count <= files_processed_count: # Basic check
              print(f"=== Finished analysis for file: {response_file} (Duration: {file_end_time - file_start_time:.2f} seconds) ===")
         else:
+             # This state might be harder to reach if exceptions are handled correctly above
              print(f"=== Processing FAILED for file: {response_file} (Duration: {file_end_time - file_start_time:.2f} seconds) ===")
 
 
