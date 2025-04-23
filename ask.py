@@ -18,7 +18,7 @@ from requests.exceptions import RequestException
 TRANSIENT_FAILURE_MARKER = object() # Use a unique object marker
 PROGRESS_COUNTER = 0
 PROGRESS_LOCK = threading.Lock()
-VALID_PROVIDERS = ["openai", "openrouter", "fireworks", "chutes", "google", "manual"]
+VALID_PROVIDERS = ["openai", "openrouter", "fireworks", "chutes", "google"]
 
 # --- API Endpoint Constants ---
 OPENAI_API_BASE = "https://api.openai.com/v1"
@@ -26,7 +26,6 @@ OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 FIREWORKS_API_BASE = "https://api.fireworks.ai/inference/v1"
 CHUTES_API_BASE = "https://llm.chutes.ai/v1"
 GOOGLE_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
-MANUAL_API_BASE = "http://arcweld.tailb38b5.ts.net:9020/v1" # Example, adjust if needed
 
 # --- Helper Functions for Identifying Response Types ---
 def is_permanent_api_error(resp):
@@ -385,10 +384,6 @@ def ask_question(question, question_id, model_id, api_target, api_key):
     elif api_provider_name == "chutes":
         url = f"{CHUTES_API_BASE}/chat/completions"
         headers["Authorization"] = f"Bearer {api_key}"
-        data = {"model": model_id, "messages": [{"role": "user", "content": question}]}
-    elif api_provider_name == "manual":
-        url = f"{MANUAL_API_BASE}/chat/completions"
-        headers["Authorization"] = f"Bearer na"
         data = {"model": model_id, "messages": [{"role": "user", "content": question}]}
     elif api_provider_name == "google":
         url = f"{GOOGLE_API_BASE}/models/{model_id}:generateContent?key={api_key}"
@@ -956,13 +951,12 @@ def get_api_key_for_provider(provider_name, fail_if_missing=True):
     elif provider_name == "openrouter": env_var = 'OPENROUTER_API_KEY'
     elif provider_name == "fireworks": env_var = 'FIREWORKS_API_KEY'
     elif provider_name == "chutes": env_var = 'CHUTES_API_TOKEN'
-    elif provider_name == "manual": env_var = "na"; api_key = "na"
     elif provider_name == "google": env_var = 'GEMINI_API_KEY'
     else: raise ValueError(f"Invalid provider name '{provider_name}' for API key lookup.")
 
-    if provider_name != "manual": api_key = os.getenv(env_var)
+    api_key = os.getenv(env_var)
 
-    if not api_key and fail_if_missing and provider_name != "manual":
+    if not api_key and fail_if_missing:
         raise ValueError(f"Required API key environment variable '{env_var}' is not set for provider '{provider_name}'.")
 
     return api_key, env_var
