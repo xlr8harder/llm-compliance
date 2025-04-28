@@ -5,3 +5,4 @@ numpy
 streamlit
 pandas
 plotly
+git+https://github.com/xlr8harder/llm_client.git@main
