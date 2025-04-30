@@ -50,3 +50,9 @@ python ask.py -w 20 mistralai/mistral-small-3.1-24b-instruct questions/us_hard.j
 python judge_compliance.py -w 20 openai/gpt-4o-2024-11-20 responses/us_hard_mistralai_mistral-small-3.1-24b-instruct.jsonl
 ```
 
+## Process new questions
+```bash
+for response in responses/us_hard_*  ; do echo $response ; python ask.py -w 15 --detect $response  ; done
+```
+
+
