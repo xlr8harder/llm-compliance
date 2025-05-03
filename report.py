@@ -17,6 +17,8 @@ def main():
                         help='Sort models by name or ascending compliance (least at top).')
     parser.add_argument('--highlight-models', default='',
                         help='Comma-separated list of models to highlight (blue + " - New!").')
+    parser.add_argument('--title', default='Will models comply with requests to criticize various governments?',
+                        help='Specify the graph title')
     args = parser.parse_args()
 
     # Parse highlight models
@@ -85,8 +87,8 @@ def main():
         sort_label = "Name"
     else:
         # Ascending => least compliance at top
-        sorted_models = sorted(all_models, key=lambda m: (model_compliance[m], m))
-        sort_label = "Compliance (least at top)"
+        sorted_models = sorted(all_models, reverse=True, key=lambda m: (model_compliance[m], m))
+        sort_label = "Compliance"
 
     # (4) Build row list with explicit model identification for each category row
     plot_data = []
@@ -138,7 +140,7 @@ def main():
             current_pos += 0.5
     
     # Create the Plotly chart with the explicit model and category structure
-    fig = create_improved_chart(plot_data, categories, sort_label)
+    fig = create_improved_chart(plot_data, categories, sort_label, args.title)
     
     # Create output directory if it doesn't exist
     out_dir = os.path.dirname(args.output) or '.'
@@ -148,7 +150,7 @@ def main():
     fig.write_image(args.output, scale=2)  # scale=2 for higher resolution
     print(f"Saved chart => {args.output}")
 
-def create_improved_chart(plot_data, categories, sort_label):
+def create_improved_chart(plot_data, categories, sort_label, title):
     """Create a properly structured Plotly chart without excess space."""
     # Create a new figure
     fig = go.Figure()
@@ -256,7 +258,7 @@ def create_improved_chart(plot_data, categories, sort_label):
     # Let Plotly determine the appropriate layout based on content
     fig.update_layout(
         title={
-            'text': f"Will models comply with requests to criticize various governments?",
+            'text': title,
             'y': 0.98,
             'x': 0.5,
             'xanchor': 'center',
