@@ -70,28 +70,49 @@ class ModelResponse:
         """Convert to dictionary, excluding None values."""
         return {k: v for k, v in asdict(self).items() if v is not None}
     
-    def finish_reason(self) -> Optional[str]:
+    def _finish_reason(self) -> str | None:
+        """Return finish_reason if it exists in the first choice."""
         try:
-            return (self.response["choices"][0]
-                    .get("finish_reason"))
-        except Exception:
+            return (self.response["choices"][0].get("finish_reason"))
+        except Exception:  # noqa: BLE001
             return None
 
-    def is_permanent_error(self) -> bool:
-        # 1) use llm_client helper if possible
-        from utils.llm_client import is_permanent_api_error
-        if is_permanent_api_error(self.response):
+    def _contains_api_error(self) -> bool:
+        """
+        Tight clone of the old utils.llm_client.is_permanent_api_error
+        but local to the schema:
+
+        • Top-level "error" key  -> permanent error  
+        • choices[0]["error"]    -> permanent error  
+        • HTTP / provider errors are already baked into the blob
+        """
+        # Top-level
+        if isinstance(self.response, dict) and self.response.get("error"):
             return True
-        # 2) structural-but-empty glitch
+        # Inside first choice
         try:
-            if (self.response.get("choices")
-                    and self.response["choices"][0].get("message", {})
-                           .get("content") == ""):
+            first_choice = self.response["choices"][0]
+            if isinstance(first_choice, dict) and first_choice.get("error"):
                 return True
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
-        # 3) provider signalled an “error” finish_reason
-        return self.finish_reason() == "error"
+        return False
+
+    def is_permanent_error(self) -> bool:
+        if self._contains_api_error():
+            return True
+        if self._finish_reason() == "error":
+            return True
+        # structurally‐valid but empty content
+        try:
+            if (
+                self.response.get("choices")
+                and self.response["choices"][0].get("message", {}).get("content") == ""
+            ):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        return False
 
     def is_success(self) -> bool:
         return not self.is_permanent_error()
