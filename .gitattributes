@@ -10,3 +10,6 @@
 /analysis/compliance_us_hard_microsoft_phi-4-reasoning.jsonl filter=lfs diff=lfs merge=lfs -text
 /responses/us_hard_microsoft_phi-4-reasoning-plus.jsonl filter=lfs diff=lfs merge=lfs -text
 /responses/us_hard_microsoft_phi-4-reasoning.jsonl filter=lfs diff=lfs merge=lfs -text
+/analysis/compliance_us_hard_moonshotai_kimi-vl-a3b-thinking.jsonl filter=lfs diff=lfs merge=lfs -text
+/responses/us_hard_moonshotai_kimi-vl-a3b-thinking.jsonl filter=lfs diff=lfs merge=lfs -text
+/responses/us_hard_qwen_qwen3-235b-a22b.jsonl filter=lfs diff=lfs merge=lfs -text
