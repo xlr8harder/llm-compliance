@@ -291,7 +291,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
                 domain=question.domain,
             )
 
-        JSONLHandler.save_jsonl([model_response], responses_path, append=True)
+            JSONLHandler.save_jsonl([model_response], responses_path, append=True)
 
         LOGGER.info(
             "Completed run → wrote %d new responses (file now has %d total)",
