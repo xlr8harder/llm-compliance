@@ -25,6 +25,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
+import threading
+import time
+from collections import deque
 
 from tqdm import tqdm  # type: ignore
 
@@ -47,6 +50,35 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+class RateLimiter:
+    """Allow at most *max_calls* every *period* seconds (rolling window)."""
+
+    def __init__(self, max_calls: int, period: float):
+        self.max_calls = max_calls
+        self.period = period
+        self._lock = threading.Lock()
+        self._timestamps: deque[float] = deque()    # monotonic times
+
+    def acquire(self) -> None:
+        """Block until the caller may proceed."""
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                # drop expired timestamps
+                while self._timestamps and now - self._timestamps[0] >= self.period:
+                    self._timestamps.popleft()
+
+                if len(self._timestamps) < self.max_calls:
+                    self._timestamps.append(now)
+                    return  # permission granted – exit
+
+                # how long until the earliest timestamp leaves the window?
+                sleep_for = self.period - (now - self._timestamps[0])
+
+            # *outside* the lock while sleeping
+            time.sleep(sleep_for)
+
 
 ###############################################################################
 # Helper functions
@@ -115,7 +147,11 @@ def ask_worker(
     provider_name: str,
     api_model: str,
     ignore_list: Optional[List[str]],
+    limiter: Optional[RateLimiter],
 ):
+    if limiter:
+        limiter.acquire()
+
     provider = llm_client.get_provider(provider_name)
     options: dict[str, object] = {"timeout": 90}
     if ignore_list and provider_name == "openrouter":
@@ -150,6 +186,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", type=Path, help="output JSONL path (normal mode)")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--frpe", action="store_true", help="clean permanent errors before retrying")
+
+    parser.add_argument(
+        "--rate-limit",
+        type=int,
+        default=0,
+        help="Max requests allowed per period (0 = unlimited)",
+    )
+    parser.add_argument(
+        "--rate-period",
+        type=float,
+        default=60.0,
+        help="Window size in seconds for --rate-limit",
+    )
 
     parser.add_argument(
         "--no-coherency",
@@ -262,12 +311,19 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
 
     LOGGER.info("Processing → output=%s", responses_path)
 
+    limiter: Optional[RateLimiter]
+    if args.rate_limit > 0:
+        limiter = RateLimiter(args.rate_limit, args.rate_period)
+        LOGGER.info("Rate limiter active → ≤ %d req / %.0fs", args.rate_limit, args.rate_period)
+    else:
+        limiter = None
+
     # ------------------------------------------------------------------
     # ThreadPool execution
     # ------------------------------------------------------------------
     with ThreadPoolExecutor(max_workers=args.workers) as pool, tqdm(total=len(pending_questions)) as tqdm_bar:
         future_map = {
-            pool.submit(ask_worker, question, provider_name, api_model, ignore_list): question
+            pool.submit(ask_worker, question, provider_name, api_model, ignore_list, limiter): question
             for question in pending_questions
         }
         for future in as_completed(future_map):
