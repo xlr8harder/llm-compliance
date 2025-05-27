@@ -8,3 +8,5 @@
 {"canonical_name": "anthropic/claude-sonnet-4", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-sonnet-4", "priority": 0}]}
 {"canonical_name": "anthropic/claude-opus-4", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4", "priority": 0}]}
 {"canonical_name": "google/gemma-3n-e4b-it", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemma-3n-e4b-it:free", "priority": 0}]}
+{"canonical_name": "anthropic/claude-sonnet-4-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-sonnet-4", "priority": 0}], "request_overrides": {"reasoning": {"max_tokens": 512}}}
+{"canonical_name": "anthropic/claude-opus-4-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4", "priority": 0}], "request_overrides": {"reasoning": {"max_tokens": 512}}}
