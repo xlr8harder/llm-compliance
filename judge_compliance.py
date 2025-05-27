@@ -204,6 +204,29 @@ def process_file(
     else:
         LOGGER.info("Force‑restart: ignoring previous analysis file %s", analysis_path)
 
+    # create a map of current responses by question_id for timestamp comparison.
+    responses_map = {resp.question_id: resp for resp in model_responses}
+
+    # clean up analyses map: remove entries that are outdated
+    cleaned_analyses = {}
+    for qid, analysis in analyses_map.items():
+        current_resp = responses_map.get(qid)
+        if current_resp is None:
+            # keep analysis for resposnes that no longer exist in input, though
+            # this shouldn't probably happen
+            cleaned_analyses[qid] = analysis
+        elif current_resp.timestamp <= analysis.timestamp:
+            # keep analysis if it's newer than response
+            cleaned_analyses[qid] = analysis
+    if cleaned_analyses:
+        JSONLHandler.save_jsonl(list(cleaned_analyses.values()), analysis_path, append=False)
+        LOGGER.info("Cleaned analysis file: kept %d entries, will re-judge others", len(cleaned_analyses))
+    else:
+        # remove the file if no entires to keep
+        analysis_path.unlink(missing_ok=True)
+        LOGGER.info("Removed analysis file: will re-judge all entries")
+    analyses_map = cleaned_analyses
+
     # Work list: new or updated responses
     to_judge: List[ModelResponse] = []
     for resp in model_responses:
