@@ -34,6 +34,7 @@ class ModelCatalogEntry:
     parameters: Optional[int] = None
     context_window: Optional[int] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    request_overrides: dict[str, object] = field(default_factory=dict)
     
     def add_provider(self, provider: str, model_id: str, priority: int = 0) -> None:
         """
@@ -58,6 +59,10 @@ class ModelCatalogEntry:
     def get_preferred_provider(self) -> Optional[ModelProvider]:
         """Return the highest priority provider or None if no providers."""
         return self.providers[0] if self.providers else None
+
+    def get_request_overrides(self) -> dict[str, object]:
+        """Return a shallow copy"""
+        return dict(self.request_overrides)
     
     def to_dict(self) -> Dict:
         """Convert to dictionary, excluding empty fields."""
@@ -131,6 +136,7 @@ class ModelCatalog:
     
     def add_or_update_model(self, canonical_name: str, provider: str = None, 
                            provider_model_id: str = None, priority: int = 0,
+                           request_overrides: dict[str, object] | None = None,
                            **metadata) -> ModelCatalogEntry:
         """
         Add a new model or update an existing one.
@@ -162,6 +168,9 @@ class ModelCatalog:
             # Add provider if specified
             if provider and provider_model_id:
                 entry.add_provider(provider, provider_model_id, priority)
+
+            if request_overrides:
+                entry.request_overrides.update(request_overrides)
             
             return entry
     

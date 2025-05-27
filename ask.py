@@ -24,7 +24,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import threading
 import time
 from collections import deque
@@ -50,6 +50,10 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+###############################################################################
+# RateLimiter helper
+###############################################################################
 
 class RateLimiter:
     """Allow at most *max_calls* every *period* seconds (rolling window)."""
@@ -79,13 +83,11 @@ class RateLimiter:
             # *outside* the lock while sleeping
             time.sleep(sleep_for)
 
-
 ###############################################################################
 # Helper functions
 ###############################################################################
 
 def load_questions(file_path: Path) -> List[Question]:
-    """Read validated ``Question`` rows from *file_path*."""
     questions = JSONLHandler.load_jsonl(file_path, Question)
     if not questions:
         raise ValueError(f"no valid questions in {file_path}")
@@ -93,14 +95,12 @@ def load_questions(file_path: Path) -> List[Question]:
 
 
 def load_model_responses(file_path: Path) -> List[ModelResponse]:
-    """Safe wrapper – returns an empty list when the file is absent."""
     if not file_path.exists():
         return []
     return JSONLHandler.load_jsonl(file_path, ModelResponse)
 
 
 def clean_frpe(responses_path: Path) -> List[ModelResponse]:
-    """Remove permanent‑error rows, rewrite the file, and return the kept rows."""
     existing_rows = load_model_responses(responses_path)
     kept_rows = [row for row in existing_rows if row.is_success()]
     if len(kept_rows) != len(existing_rows):
@@ -110,7 +110,6 @@ def clean_frpe(responses_path: Path) -> List[ModelResponse]:
 
 
 def detect_metadata(responses_path: Path):
-    """Extract provider / api_model / canonical / category from the first row."""
     for row in load_model_responses(responses_path):
         return {
             "provider": row.api_provider,
@@ -127,7 +126,6 @@ def resolve_catalog_entry(
     provider: str,
     api_model: str,
 ):
-    """Resolve and, if complete information provided, store the mapping."""
     canonical, provider_resolved, api_model_resolved = catalog.resolve_model(
         canonical_name=canonical_name,
         provider=provider,
@@ -137,9 +135,8 @@ def resolve_catalog_entry(
         raise RuntimeError("Cannot resolve provider / model – please provide explicit flags")
     return canonical or canonical_name, provider_resolved, api_model_resolved
 
-
 ###############################################################################
-# Worker function (ThreadPool)
+# Worker function (added *overrides* param)
 ###############################################################################
 
 def ask_worker(
@@ -148,6 +145,7 @@ def ask_worker(
     api_model: str,
     ignore_list: Optional[List[str]],
     limiter: Optional[RateLimiter],
+    overrides: Optional[Dict[str, Any]] = None,
 ):
     if limiter:
         limiter.acquire()
@@ -164,12 +162,12 @@ def ask_worker(
         max_retries=4,
         context={"qid": question.id},
         **options,
+        **(overrides or {}),  # merge generic request overrides
     )
     return response
 
-
 ###############################################################################
-# CLI parsing
+# CLI parsing (only two new flags added)
 ###############################################################################
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -187,18 +185,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--frpe", action="store_true", help="clean permanent errors before retrying")
 
-    parser.add_argument(
-        "--rate-limit",
-        type=int,
-        default=0,
-        help="Max requests allowed per period (0 = unlimited)",
-    )
-    parser.add_argument(
-        "--rate-period",
-        type=float,
-        default=60.0,
-        help="Window size in seconds for --rate-limit",
-    )
+    parser.add_argument("--rate-limit", type=int, default=0, help="Max requests allowed per period (0 = unlimited)")
+    parser.add_argument("--rate-period", type=float, default=60.0, help="Window size in seconds for --rate-limit")
 
     parser.add_argument(
         "--no-coherency",
@@ -209,15 +197,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--catalog", type=Path, default=Path("model_catalog.jsonl"))
 
+    # NEW flags for override control
+    parser.add_argument("--reasoning-tokens", type=int, help="OpenRouter reasoning.max_tokens value")
+    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], help="OpenRouter effort level")
+
     return parser
 
-
 ###############################################################################
-# Main entry point
+# Main entry point (override logic only addition)
 ###############################################################################
 
 def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
-    """Entry‑point wrapper so unit tests can call ``main([])``."""
     args = build_arg_parser().parse_args(argv)
 
     # ------------------------------------------------------------------
@@ -249,17 +239,29 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     responses_path.parent.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
-    # ModelCatalog resolution / update
+    # ModelCatalog resolution / update plus overrides
     # ------------------------------------------------------------------
     catalog = ModelCatalog(args.catalog)
     canonical_name, provider_name, api_model = resolve_catalog_entry(
         catalog, canonical_cli, provider_name, api_model
     )
+
+    catalog_entry = catalog.get_model(canonical_name) if canonical_name else None
+    overrides: Dict[str, Any] = dict(catalog_entry.get_request_overrides()) if catalog_entry else {}
+
+    # Merge CLI flags
+    if args.reasoning_tokens is not None:
+        overrides.setdefault("reasoning", {})["max_tokens"] = args.reasoning_tokens
+    if args.reasoning_effort is not None:
+        overrides["effort"] = args.reasoning_effort
+
+    # Persist mapping when fully specified on CLI
     if args.canonical_name and args.provider and args.model:
         catalog.add_or_update_model(
             canonical_name=args.canonical_name,
             provider=args.provider,
             provider_model_id=args.model,
+            request_overrides=overrides,
         )
         catalog.save_catalog()
 
@@ -267,11 +269,12 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     # Log final configuration summary (useful in loops)
     # ------------------------------------------------------------------
     LOGGER.info(
-        "Configuration → model=%s (canon=%s) provider=%s questions=%s",
+        "Configuration → model=%s (canon=%s) provider=%s questions=%s overrides=%s",
         api_model,
         canonical_name or "<none>",
         provider_name,
         questions_file.name,
+        overrides if overrides else "<none>",
     )
 
     # ------------------------------------------------------------------
@@ -323,7 +326,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     # ------------------------------------------------------------------
     with ThreadPoolExecutor(max_workers=args.workers) as pool, tqdm(total=len(pending_questions)) as tqdm_bar:
         future_map = {
-            pool.submit(ask_worker, question, provider_name, api_model, ignore_list, limiter): question
+            pool.submit(ask_worker, question, provider_name, api_model, ignore_list, limiter, overrides): question
             for question in pending_questions
         }
         for future in as_completed(future_map):
@@ -355,5 +358,6 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
             len(load_model_responses(responses_path)),
         )
 
+
 if __name__ == "__main__":
-        main()
+    main()
