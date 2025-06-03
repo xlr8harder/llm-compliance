@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Type
 import logging
+import dataclasses
 from dataclasses import fields as dataclass_fields
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,6 @@ class JSONLHandler:
                                 # Try harder to make it work by handling only the required fields
                                 try:
                                     # Get required fields (those without default values)
-                                    import dataclasses
                                     required_fields = {f.name for f in dataclass_fields(cls) 
                                                      if f.default == dataclasses._MISSING_TYPE}
                                     

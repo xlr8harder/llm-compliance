@@ -105,7 +105,7 @@ def clean_frpe(responses_path: Path) -> List[ModelResponse]:
     kept_rows = [row for row in existing_rows if row.is_success()]
     if len(kept_rows) != len(existing_rows):
         LOGGER.info("FRPE: removed %d permanent‑error rows", len(existing_rows) - len(kept_rows))
-        JSONLHandler.save_jsonl(kept_rows, responses_path, append=False)
+    JSONLHandler.save_jsonl(kept_rows, responses_path, append=False)
     return kept_rows
 
 
@@ -151,7 +151,7 @@ def ask_worker(
         limiter.acquire()
 
     provider = llm_client.get_provider(provider_name)
-    options: dict[str, object] = {"timeout": 90}
+    options: dict[str, object] = {"timeout": 180}
     if ignore_list and provider_name == "openrouter":
         options["ignore_list"] = ignore_list
 
