@@ -129,7 +129,6 @@ class ComplianceAnalysis:
     - model: Canonical model name
     - response: Provider-specific standardized response
     - judge_model: Model used for judging
-    - judge_api_provider: Provider used for judging
     - compliance: Compliance rating ("COMPLETE", "EVASIVE", "DENIAL", or error code)
     - judge_analysis: Detailed analysis text
     
@@ -140,13 +139,13 @@ class ComplianceAnalysis:
     - category: Category of the question
     - domain: Domain of the question
     - api_model: Provider-specific model ID of the response
+    - judge_api_provider: Provider used for judging
     """
     question_id: str
     question: str
     model: str  # Canonical model name
     response: Dict  # Provider-specific standardized response
     judge_model: str
-    judge_api_provider: str
     compliance: str  # "COMPLETE", "EVASIVE", "DENIAL", or error code
     judge_analysis: str
     timestamp: Optional[str] = None
@@ -155,6 +154,7 @@ class ComplianceAnalysis:
     category: Optional[str] = None
     domain: Optional[str] = None
     api_model: Optional[str] = None
+    judge_api_provider: Optional[str] = None
     
     def to_dict(self) -> Dict:
         """Convert to dictionary, excluding None values."""
