@@ -11,3 +11,7 @@
 {"canonical_name": "anthropic/claude-sonnet-4-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-sonnet-4", "priority": 0}], "request_overrides": {"reasoning": {"max_tokens": 512}}}
 {"canonical_name": "anthropic/claude-opus-4-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4", "priority": 0}], "request_overrides": {"reasoning": {"max_tokens": 512}}}
 {"canonical_name": "deepseek/deepseek-r1-0528", "providers": [{"provider_name": "openrouter", "provider_model_id": "deepseek/deepseek-r1-0528", "priority": 0}]}
+{"canonical_name": "tng-ai-research/DeepSeek-R1T-0528-Chimera_test", "providers": [{"provider_name": "tngtech", "provider_model_id": "tng-ai-research/DeepSeek-R1T-0528-Chimera", "priority": 0}]}
+{"canonical_name": "google/gemini-2.5-pro-preview-06-05-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemini-2.5-pro-preview", "priority": 0}]}
+{"canonical_name": "mistralai/magistral-medium-2506-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/magistral-medium-2506:thinking", "priority": 0}]}
+{"canonical_name": "mistralai/magistral-medium-2506", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/magistral-medium-2506", "priority": 0}]}
