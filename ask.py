@@ -10,7 +10,7 @@ Two modes
 
 Features preserved from the legacy implementation
 -------------------------------------------------
-* `--frpe`  – “Force‑Retry Permanent Errors” cleanup.
+* `--frpe`  – "Force‑Retry Permanent Errors" cleanup.
 * Optional coherency gate (OpenRouter sub‑provider blacklist).
 * Provider calls go through **llm_client.retry_request**.
 * ModelCatalog is lazily extended when a full mapping is supplied on the CLI.
@@ -136,7 +136,7 @@ def resolve_catalog_entry(
     return canonical or canonical_name, provider_resolved, api_model_resolved
 
 ###############################################################################
-# Worker function (added *overrides* param)
+# Worker function (modified to support system prompt)
 ###############################################################################
 
 def ask_worker(
@@ -146,6 +146,7 @@ def ask_worker(
     ignore_list: Optional[List[str]],
     limiter: Optional[RateLimiter],
     overrides: Optional[Dict[str, Any]] = None,
+    system_prompt: Optional[str] = None,
 ):
     if limiter:
         limiter.acquire()
@@ -155,9 +156,15 @@ def ask_worker(
     if ignore_list and provider_name == "openrouter":
         options["ignore_list"] = ignore_list
 
+    # Build messages list - add system prompt if provided
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": question.question})
+
     response = retry_request(
         provider=provider,
-        messages=[{"role": "user", "content": question.question}],
+        messages=messages,
         model_id=api_model,
         max_retries=4,
         context={"qid": question.id},
@@ -167,7 +174,7 @@ def ask_worker(
     return response
 
 ###############################################################################
-# CLI parsing (only two new flags added)
+# CLI parsing (added --system-prompt flag)
 ###############################################################################
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -197,14 +204,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--catalog", type=Path, default=Path("model_catalog.jsonl"))
 
-    # NEW flags for override control
     parser.add_argument("--reasoning-tokens", type=int, help="OpenRouter reasoning.max_tokens value")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], help="OpenRouter effort level")
+    parser.add_argument("--system-prompt", help="System prompt to include in requests")
 
     return parser
 
 ###############################################################################
-# Main entry point (override logic only addition)
+# Main entry point (modified to pass system prompt)
 ###############################################################################
 
 def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
@@ -268,13 +275,15 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     # ------------------------------------------------------------------
     # Log final configuration summary (useful in loops)
     # ------------------------------------------------------------------
+    system_prompt_info = f"system_prompt={len(args.system_prompt)} chars" if args.system_prompt else "system_prompt=none"
     LOGGER.info(
-        "Configuration → model=%s (canon=%s) provider=%s questions=%s overrides=%s",
+        "Configuration → model=%s (canon=%s) provider=%s questions=%s overrides=%s %s",
         api_model,
         canonical_name or "<none>",
         provider_name,
         questions_file.name,
         overrides if overrides else "<none>",
+        system_prompt_info,
     )
 
     # ------------------------------------------------------------------
@@ -322,11 +331,11 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         limiter = None
 
     # ------------------------------------------------------------------
-    # ThreadPool execution
+    # ThreadPool execution (now passes system prompt)
     # ------------------------------------------------------------------
     with ThreadPoolExecutor(max_workers=args.workers) as pool, tqdm(total=len(pending_questions)) as tqdm_bar:
         future_map = {
-            pool.submit(ask_worker, question, provider_name, api_model, ignore_list, limiter, overrides): question
+            pool.submit(ask_worker, question, provider_name, api_model, ignore_list, limiter, overrides, args.system_prompt): question
             for question in pending_questions
         }
         for future in as_completed(future_map):
