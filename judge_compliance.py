@@ -11,6 +11,7 @@ Streaming version
 * `--force-restart` discards any previous analysis file for the given
   responses file.
 * Uses the original judging prompt verbatim.
+* Outputs overall summaries for each category when done judging.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ import argparse
 import logging
 import re
 import sys
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -86,6 +88,55 @@ def extract_compliance_fields(judge_text: str) -> tuple[str, str]:
     analysis = analysis_match.group(1).strip() if analysis_match else "<missing>"
     compliance = compliance_match.group(1).upper() if compliance_match else "ERROR_JUDGE_FORMAT"
     return analysis, compliance
+
+###############################################################################
+# Summary helpers
+###############################################################################
+
+def generate_category_summary(analyses: List[ComplianceAnalysis]) -> Dict[str, any]:
+    """Generate summary statistics for a category."""
+    if not analyses:
+        return {}
+    
+    total = len(analyses)
+    compliance_counts = defaultdict(int)
+    
+    for analysis in analyses:
+        compliance_counts[analysis.compliance] += 1
+    
+    # Calculate percentages
+    compliance_percentages = {
+        compliance: (count / total) * 100 
+        for compliance, count in compliance_counts.items()
+    }
+    
+    return {
+        "total_responses": total,
+        "compliance_counts": dict(compliance_counts),
+        "compliance_percentages": compliance_percentages,
+        "model": analyses[0].model if analyses else "unknown",
+        "judge_model": analyses[0].judge_model if analyses else "unknown",
+    }
+
+def print_category_summary(category: str, summary: Dict[str, any]) -> None:
+    """Print formatted summary for a category."""
+    if not summary:
+        return
+    
+    print(f"\n{'='*60}")
+    print(f"CATEGORY SUMMARY: {category}")
+    print(f"{'='*60}")
+    print(f"Model: {summary['model']}")
+    print(f"Judge Model: {summary['judge_model']}")
+    print(f"Total Responses: {summary['total_responses']}")
+    print()
+    
+    # Print compliance breakdown
+    print("COMPLIANCE BREAKDOWN:")
+    print("-" * 30)
+    for compliance, count in summary["compliance_counts"].items():
+        percentage = summary["compliance_percentages"][compliance]
+        print(f"  {compliance:20} {count:4d} ({percentage:5.1f}%)")
 
 ###############################################################################
 # Utility wrappers
@@ -175,6 +226,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers", type=int, default=30)
     parser.add_argument("--force-restart", action="store_true", help="discard existing analysis file and start fresh")
     parser.add_argument("--max-errors", type=int, default=5, help="abort after N consecutive permanent judge errors")
+    parser.add_argument("--no-summary", action="store_true", help="skip category summaries at the end")
     return parser
 
 ###############################################################################
@@ -186,7 +238,8 @@ def process_file(
     workers: int,
     max_errors: int,
     force_restart: bool,
-) -> None:
+) -> List[ComplianceAnalysis]:
+    """Process a single responses file and return all analyses."""
     analysis_dir = Path("analysis")
     analysis_dir.mkdir(exist_ok=True)
     analysis_path = analysis_dir / f"compliance_{responses_path.stem}.jsonl"
@@ -194,7 +247,7 @@ def process_file(
     model_responses = load_jsonl_safe(responses_path, ModelResponse)
     if not model_responses:
         LOGGER.warning("%s has no valid ModelResponse rows – skipping", responses_path)
-        return
+        return []
 
     # Existing analyses (keyed by qid)
     analyses_map: Dict[str, ComplianceAnalysis] = {}
@@ -241,46 +294,49 @@ def process_file(
         len(model_responses),
         analysis_path.name,
     )
-    if not to_judge:
-        return
 
-    lock = Lock()  # guard streaming writes
-    consecutive_errors = 0
+    # Process pending judgments if any
+    if to_judge:
+        lock = Lock()  # guard streaming writes
+        consecutive_errors = 0
 
-    with ThreadPoolExecutor(max_workers=workers) as pool, tqdm(total=len(to_judge)) as bar:
-        future_map = {pool.submit(judge_worker, mr): mr.question_id for mr in to_judge}
-        for future in as_completed(future_map):
-            bar.update(1)
-            qid = future_map[future]
-            try:
-                result = future.result()
-            except Exception as exc:  # noqa: BLE001
-                LOGGER.exception("Worker crashed for %s: %s", qid, exc)
-                consecutive_errors += 1
-            else:
-                if isinstance(result, RuntimeError):
-                    errmsg = str(result)
-                    if errmsg == "TRANSIENT_JUDGE_FAILURE":
-                        LOGGER.warning("Transient judge failure on %s (will retry next run)", qid)
-                        # Do *not* bump permanent‑error counter
-                    else:
-                        LOGGER.error("Permanent judge error on %s: %s", qid, errmsg)
-                        consecutive_errors += 1
+        with ThreadPoolExecutor(max_workers=workers) as pool, tqdm(total=len(to_judge)) as bar:
+            future_map = {pool.submit(judge_worker, mr): mr.question_id for mr in to_judge}
+            for future in as_completed(future_map):
+                bar.update(1)
+                qid = future_map[future]
+                try:
+                    result = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.exception("Worker crashed for %s: %s", qid, exc)
+                    consecutive_errors += 1
                 else:
-                    # success or ERROR_ORIGINAL_RESPONSE – stream to disk
-                    with lock:
-                        JSONLHandler.save_jsonl([result], analysis_path, append=True)
-                    analyses_map[qid] = result
-                    consecutive_errors = 0
+                    if isinstance(result, RuntimeError):
+                        errmsg = str(result)
+                        if errmsg == "TRANSIENT_JUDGE_FAILURE":
+                            LOGGER.warning("Transient judge failure on %s (will retry next run)", qid)
+                            # Do *not* bump permanent‑error counter
+                        else:
+                            LOGGER.error("Permanent judge error on %s: %s", qid, errmsg)
+                            consecutive_errors += 1
+                    else:
+                        # success or ERROR_ORIGINAL_RESPONSE – stream to disk
+                        with lock:
+                            JSONLHandler.save_jsonl([result], analysis_path, append=True)
+                        analyses_map[qid] = result
+                        consecutive_errors = 0
 
-            if consecutive_errors >= max_errors:
-                raise RuntimeError(
-                    f"Aborting – reached {consecutive_errors} consecutive permanent judge errors"
-                )
+                if consecutive_errors >= max_errors:
+                    raise RuntimeError(
+                        f"Aborting – reached {consecutive_errors} consecutive permanent judge errors"
+                    )
 
     LOGGER.info(
         "File %s done – total analyses now %d", analysis_path.name, len(analyses_map)
     )
+    
+    # Return all analyses for this file
+    return list(analyses_map.values())
 
 ###############################################################################
 # Entrypoint wrapper
@@ -289,18 +345,52 @@ def process_file(
 def main(argv: Optional[List[str]] | None = None) -> None:  # noqa: D401
     args = build_arg_parser().parse_args(argv)
 
+    # Collect all analyses by category
+    all_analyses_by_category: Dict[str, List[ComplianceAnalysis]] = defaultdict(list)
     exit_status = 0
+    
     for path in args.response_files:
         try:
-            process_file(
+            analyses = process_file(
                 responses_path=path,
                 workers=args.workers,
                 max_errors=args.max_errors,
                 force_restart=args.force_restart,
             )
+            
+            # Group analyses by category
+            for analysis in analyses:
+                # Extract category from the response file name or use the category from ModelResponse
+                # First try to get category from the analysis object's related model response
+                category = "unknown"
+                
+                # Try to infer category from filename (e.g., "responses_category_model.jsonl")
+                filename_parts = path.stem.split('_')
+                if len(filename_parts) >= 2:
+                    category = filename_parts[1]  # Assume second part is category
+                
+                all_analyses_by_category[category].append(analysis)
+                
         except Exception as exc:  # noqa: BLE001
             LOGGER.error("Processing failed for %s: %s", path, exc)
             exit_status = 1
+
+    # Print category summaries
+    if not args.no_summary and all_analyses_by_category:
+        print("\n" + "="*80)
+        print("OVERALL COMPLIANCE SUMMARY")
+        print("="*80)
+        
+        for category, analyses in sorted(all_analyses_by_category.items()):
+            if analyses:  # Only show categories with data
+                summary = generate_category_summary(analyses)
+                print_category_summary(category, summary)
+        
+        # Print overall summary across all categories
+        all_analyses = [analysis for analyses in all_analyses_by_category.values() for analysis in analyses]
+        if len(all_analyses_by_category) > 1:
+            overall_summary = generate_category_summary(all_analyses)
+            print_category_summary("OVERALL", overall_summary)
 
     sys.exit(exit_status)
 
