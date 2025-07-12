@@ -35,9 +35,13 @@ def extract_response_text(analysis: ComplianceAnalysis) -> str:
     if not analysis.response:
         return ""
     
-    # Navigate the response structure to get the actual text
-    content = analysis.response["choices"][0]["message"]["content"]
-    return content if content else ""
+    try:
+        # Navigate the response structure to get the actual text
+        content = analysis.response["choices"][0]["message"]["content"]
+        return content if content else ""
+    except (KeyError, IndexError, TypeError):
+        # Handle malformed responses (ERROR cases, etc.)
+        return ""
 
 
 def get_lemmatized_words(text: str, lemmatizer: WordNetLemmatizer, stop_words: set) -> List[str]:
@@ -247,7 +251,7 @@ def print_sorted_results(results: List[Tuple[str, str, float, float, int, int]],
         model_stats[model]["unique"].append(unique)
         model_stats[model]["total"].append(total)
     
-    print(f"{'Model':<48} {'Root TTR':<9} {'Maas':<6} {'Unique':<7} {'Total':<7} {'Count':<6} {'Avg Len':<8}")
+    print(f"{'Rank':<5} {'Model':<48} {'Root TTR':<9} {'Maas':<6} {'Unique':<7} {'Avg Len':<8} {'Count':<6}")
     print("-" * 115)
     
     # Sort models by Root TTR (descending - higher is better)
@@ -258,16 +262,15 @@ def print_sorted_results(results: List[Tuple[str, str, float, float, int, int]],
     # Apply top_n filter to model summary too
     display_models = sorted_models[:top_n] if top_n else sorted_models
     
-    for model, stats in display_models:
+    for rank, (model, stats) in enumerate(display_models, 1):
         avg_root_ttr = sum(stats["root_ttr"]) / len(stats["root_ttr"])
         avg_maas = sum(stats["maas"]) / len(stats["maas"])
         avg_unique = sum(stats["unique"]) / len(stats["unique"])
         avg_total = sum(stats["total"]) / len(stats["total"])
         count = len(stats["root_ttr"])
-        avg_length = avg_total  # This is the same as avg_total (lemmatized word count)
         
         truncated_model = truncate_model_name(model)
-        print(f"{truncated_model:<48} {avg_root_ttr:<9.4f} {avg_maas:<6.4f} {avg_unique:<7.1f} {avg_total:<7.1f} {count:<6} {avg_length:<8.1f}")
+        print(f"{rank:<5} {truncated_model:<48} {avg_root_ttr:<9.4f} {avg_maas:<6.4f} {avg_unique:<7.1f} {avg_total:<8.1f} {count:<6}")
     
     if top_n and len(sorted_models) > top_n:
         print(f"\n... showing top {top_n} of {len(sorted_models)} total models")
