@@ -15,3 +15,17 @@
 {"canonical_name": "google/gemini-2.5-pro-preview-06-05-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemini-2.5-pro-preview", "priority": 0}]}
 {"canonical_name": "mistralai/magistral-medium-2506-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/magistral-medium-2506:thinking", "priority": 0}]}
 {"canonical_name": "mistralai/magistral-medium-2506", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/magistral-medium-2506", "priority": 0}]}
+{"canonical_name": "mistralai/magistral-small-2506", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/magistral-small-2506", "priority": 0}]}
+{"canonical_name": "google/gemini-2.5-flash-lite-preview-06-17", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemini-2.5-flash-lite-preview-06-17", "priority": 0}]}
+{"canonical_name": "mistralai/mistral-small-3.2-24b-instruct", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/mistral-small-3.2-24b-instruct:free", "priority": 0}]}
+{"canonical_name": "tngtech/DeepSeek-R1T-0528-Chimera", "providers": [{"provider_name": "tngtech", "provider_model_id": "tngtech/DeepSeek-R1T-0528-Chimera", "priority": 0}]}
+{"canonical_name": "LumiOpen/Llama-Poro-2-70B-Instruct", "providers": [{"provider_name": "chutes", "provider_model_id": "LumiOpen/Llama-Poro-2-70B-Instruct", "priority": 0}]}
+{"canonical_name": "baidu/ernie-4.5-300b-a47b", "providers": [{"provider_name": "openrouter", "provider_model_id": "baidu/ernie-4.5-300b-a47b", "priority": 0}]}
+{"canonical_name": "mistralai/mistral-small-3.2-24b-instruct-2506-sysprompt-poor", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/mistral-small-3.2-24b-instruct-2506", "priority": 0}]}
+{"canonical_name": "mistralai/mistral-small-3.2-24b-instruct-2506-sysprompt-rich", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/mistral-small-3.2-24b-instruct-2506", "priority": 0}]}
+{"canonical_name": "meta-llama/llama-3.3-70b-instruct-sysprompt-poor", "providers": [{"provider_name": "openrouter", "provider_model_id": "meta-llama/llama-3.3-70b-instruct", "priority": 0}]}
+{"canonical_name": "meta-llama/llama-3.3-70b-instruct-sysprompt-rich", "providers": [{"provider_name": "openrouter", "provider_model_id": "meta-llama/llama-3.3-70b-instruct", "priority": 0}]}
+{"canonical_name": "openai/gpt-4o-2024-11-20-sysprompt-poor", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-4o-2024-11-20", "priority": 0}]}
+{"canonical_name": "openai/gpt-4o-2024-11-20-sysprompt-rich", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-4o-2024-11-20", "priority": 0}]}
+{"canonical_name": "x-ai/grok-4-07-09", "providers": [{"provider_name": "openrouter", "provider_model_id": "x-ai/grok-4-07-09", "priority": 0}]}
+{"canonical_name": "moonshotai/kimi-k2-instruct", "providers": [{"provider_name": "openrouter", "provider_model_id": "moonshotai/kimi-k2", "priority": 0}]}
