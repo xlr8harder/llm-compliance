@@ -29,3 +29,5 @@
 {"canonical_name": "openai/gpt-4o-2024-11-20-sysprompt-rich", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-4o-2024-11-20", "priority": 0}]}
 {"canonical_name": "x-ai/grok-4-07-09", "providers": [{"provider_name": "openrouter", "provider_model_id": "x-ai/grok-4-07-09", "priority": 0}]}
 {"canonical_name": "moonshotai/kimi-k2-instruct", "providers": [{"provider_name": "openrouter", "provider_model_id": "moonshotai/kimi-k2", "priority": 0}]}
+{"canonical_name": "qwen/qwen3-235b-a22b-2507", "providers": [{"provider_name": "openrouter", "provider_model_id": "qwen/qwen3-235b-a22b-2507", "priority": 0}]}
+{"canonical_name": "qwen/qwen3-235b-a22b-thinking-2507", "providers": [{"provider_name": "openrouter", "provider_model_id": "qwen/qwen3-235b-a22b-thinking-2507", "priority": 0}]}
