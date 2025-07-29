@@ -31,3 +31,6 @@
 {"canonical_name": "moonshotai/kimi-k2-instruct", "providers": [{"provider_name": "openrouter", "provider_model_id": "moonshotai/kimi-k2", "priority": 0}]}
 {"canonical_name": "qwen/qwen3-235b-a22b-2507", "providers": [{"provider_name": "openrouter", "provider_model_id": "qwen/qwen3-235b-a22b-2507", "priority": 0}]}
 {"canonical_name": "qwen/qwen3-235b-a22b-thinking-2507", "providers": [{"provider_name": "openrouter", "provider_model_id": "qwen/qwen3-235b-a22b-thinking-2507", "priority": 0}]}
+{"canonical_name": "z-ai/glm-4.5", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-4.5", "priority": 0}]}
+{"canonical_name": "cognitivecomputations/dolphin-mistral-24b-venice-edition", "providers": [{"provider_name": "openrouter", "provider_model_id": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free", "priority": 0}]}
+{"canonical_name": "z-ai/glm-4.5-air", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-4.5-air", "priority": 0}]}
