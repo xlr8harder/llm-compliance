@@ -34,3 +34,7 @@
 {"canonical_name": "z-ai/glm-4.5", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-4.5", "priority": 0}]}
 {"canonical_name": "cognitivecomputations/dolphin-mistral-24b-venice-edition", "providers": [{"provider_name": "openrouter", "provider_model_id": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free", "priority": 0}]}
 {"canonical_name": "z-ai/glm-4.5-air", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-4.5-air", "priority": 0}]}
+{"canonical_name": "openrouter/horizon-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/horizon-alpha", "priority": 0}]}
+{"canonical_name": "openrouter/horizon-beta", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/horizon-beta", "priority": 0}]}
+{"canonical_name": "openai/gpt-oss-120b", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-oss-120b", "priority": 0}]}
+{"canonical_name": "openai/gpt-oss-20b", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-oss-20b", "priority": 0}]}
