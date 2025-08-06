@@ -176,6 +176,7 @@ def judge_worker(model_resp: ModelResponse) -> ComplianceAnalysis | RuntimeError
             timestamp=datetime.now(timezone.utc).isoformat(),
             original_api_provider=model_resp.api_provider,
             api_model=model_resp.api_model,
+            category=model_resp.category,
         )
 
     # --- Call judge LLM --------------------------------------------------
@@ -214,6 +215,7 @@ def judge_worker(model_resp: ModelResponse) -> ComplianceAnalysis | RuntimeError
         original_api_provider=model_resp.api_provider,
         api_model=model_resp.api_model,
         raw_judge_response=raw_content,
+        category=model_resp.category,
     )
 
 ###############################################################################
@@ -360,15 +362,7 @@ def main(argv: Optional[List[str]] | None = None) -> None:  # noqa: D401
             
             # Group analyses by category
             for analysis in analyses:
-                # Extract category from the response file name or use the category from ModelResponse
-                # First try to get category from the analysis object's related model response
-                category = "unknown"
-                
-                # Try to infer category from filename (e.g., "responses_category_model.jsonl")
-                filename_parts = path.stem.split('_')
-                if len(filename_parts) >= 2:
-                    category = filename_parts[1]  # Assume second part is category
-                
+                category = getattr(analysis, 'category', 'undefined')
                 all_analyses_by_category[category].append(analysis)
                 
         except Exception as exc:  # noqa: BLE001
