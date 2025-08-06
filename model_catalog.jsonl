@@ -38,3 +38,5 @@
 {"canonical_name": "openrouter/horizon-beta", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/horizon-beta", "priority": 0}]}
 {"canonical_name": "openai/gpt-oss-120b", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-oss-120b", "priority": 0}]}
 {"canonical_name": "openai/gpt-oss-20b", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-oss-20b", "priority": 0}]}
+{"canonical_name": "openai/gpt-4.1", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-4.1", "priority": 0}]}
+{"canonical_name": "openai/gpt-4.1-2025-04-14", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-4.1", "priority": 0}]}
