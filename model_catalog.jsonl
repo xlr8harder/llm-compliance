@@ -40,3 +40,9 @@
 {"canonical_name": "openai/gpt-oss-20b", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-oss-20b", "priority": 0}]}
 {"canonical_name": "openai/gpt-4.1", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-4.1", "priority": 0}]}
 {"canonical_name": "openai/gpt-4.1-2025-04-14", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-4.1", "priority": 0}]}
+{"canonical_name": "openai/gpt-5", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5", "priority": 0}, {"provider_name": "openai", "provider_model_id": "openai/gpt-5", "priority": 0}]}
+{"canonical_name": "openai/gpt-5-chat", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5", "priority": 0}, {"provider_name": "openrouter", "provider_model_id": "openai/gpt-5-chat", "priority": 0}]}
+{"canonical_name": "openai/gpt-5-mini", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5-mini", "priority": 0}]}
+{"canonical_name": "openai/gpt-5-nano", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5-nano", "priority": 0}]}
+{"canonical_name": "openai/gpt-5-nano-2025-08-07", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5-nano", "priority": 0}]}
+{"canonical_name": "openai/gpt-5-nano-2025-08-07-temp", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5-nano", "priority": 0}, {"provider_name": "openai", "provider_model_id": "openai/gpt-5-nano-2025-08-07", "priority": 0}]}
