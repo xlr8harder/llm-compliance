@@ -3,16 +3,16 @@
 
 Two modes
 ---------
-* **normal**  – supply a *questions* file, provider and model.
-* **detect**  – supply an *existing responses* file; the script infers
-               provider/model/category, cleans permanent‑error rows (optional)
-               and resumes.
+* normal  – supply a questions file, provider and model.
+* detect  – supply an existing responses file; the script infers
+            provider/model/category, cleans permanent-error rows (optional)
+            and resumes.
 
-Features preserved from the legacy implementation
--------------------------------------------------
-* `--frpe`  – "Force‑Retry Permanent Errors" cleanup.
-* Optional coherency gate (OpenRouter sub‑provider blacklist).
-* Provider calls go through **llm_client.retry_request**.
+Features
+--------
+* `--frpe`  – "Force-Retry Permanent Errors" cleanup.
+* Optional coherency gate (OpenRouter sub-provider blacklist).
+* Provider calls go through llm_client.retry_request.
 * ModelCatalog is lazily extended when a full mapping is supplied on the CLI.
 * Quiet but informative output: INFO log lines and a tqdm bar.
 """
@@ -69,18 +69,15 @@ class RateLimiter:
         while True:
             with self._lock:
                 now = time.monotonic()
-                # drop expired timestamps
                 while self._timestamps and now - self._timestamps[0] >= self.period:
                     self._timestamps.popleft()
 
                 if len(self._timestamps) < self.max_calls:
                     self._timestamps.append(now)
-                    return  # permission granted – exit
+                    return
 
-                # how long until the earliest timestamp leaves the window?
                 sleep_for = self.period - (now - self._timestamps[0])
 
-            # *outside* the lock while sleeping
             time.sleep(sleep_for)
 
 ###############################################################################
@@ -104,7 +101,7 @@ def clean_frpe(responses_path: Path) -> List[ModelResponse]:
     existing_rows = load_model_responses(responses_path)
     kept_rows = [row for row in existing_rows if row.is_success()]
     if len(kept_rows) != len(existing_rows):
-        LOGGER.info("FRPE: removed %d permanent‑error rows", len(existing_rows) - len(kept_rows))
+        LOGGER.info("FRPE: removed %d permanent-error rows", len(existing_rows) - len(kept_rows))
     JSONLHandler.save_jsonl(kept_rows, responses_path, append=False)
     return kept_rows
 
@@ -136,7 +133,7 @@ def resolve_catalog_entry(
     return canonical or canonical_name, provider_resolved, api_model_resolved
 
 ###############################################################################
-# Worker function (modified to support system prompt)
+# Worker function
 ###############################################################################
 
 def ask_worker(
@@ -147,20 +144,28 @@ def ask_worker(
     limiter: Optional[RateLimiter],
     overrides: Optional[Dict[str, Any]] = None,
     system_prompt: Optional[str] = None,
+    force_subprovider: Optional[str] = None,
 ):
     if limiter:
         limiter.acquire()
 
     provider = llm_client.get_provider(provider_name)
-    options: dict[str, object] = {"timeout": 180}
-    if ignore_list and provider_name == "openrouter":
-        options["ignore_list"] = ignore_list
 
-    # Build messages list - add system prompt if provided
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": question.question})
+
+    kwargs: Dict[str, Any] = {}
+    if overrides:
+        kwargs.update(overrides)
+    kwargs.setdefault("timeout", 180)
+
+    if provider_name == "openrouter":
+        if force_subprovider:
+            kwargs["only"] = [force_subprovider]
+        elif ignore_list:
+            kwargs["ignore_list"] = list(ignore_list)
 
     response = retry_request(
         provider=provider,
@@ -168,13 +173,12 @@ def ask_worker(
         model_id=api_model,
         max_retries=4,
         context={"qid": question.id},
-        **options,
-        **(overrides or {}),  # merge generic request overrides
+        **kwargs,
     )
     return response
 
 ###############################################################################
-# CLI parsing (added --system-prompt flag)
+# CLI parsing
 ###############################################################################
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -185,7 +189,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     mode_group.add_argument("--detect", type=Path, help="existing responses file to resume")
 
     parser.add_argument("--provider", choices=llm_client.PROVIDER_MAP.keys(), help="API provider")
-    parser.add_argument("--model", help="provider‑specific model id")
+    parser.add_argument("--model", help="provider-specific model id")
     parser.add_argument("--canonical-name", dest="canonical_name", help="canonical model name for logging")
 
     parser.add_argument("--out", type=Path, help="output JSONL path (normal mode)")
@@ -208,18 +212,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], help="OpenRouter effort level")
     parser.add_argument("--system-prompt", help="System prompt to include in requests")
 
+    parser.add_argument(
+        "--force-subprovider",
+        help="OpenRouter only: restrict to a single subprovider (uses OpenRouter 'only').",
+    )
+
     return parser
 
 ###############################################################################
-# Main entry point (modified to pass system prompt)
+# Main entry point
 ###############################################################################
 
 def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     args = build_arg_parser().parse_args(argv)
 
-    # ------------------------------------------------------------------
-    # Determine mode‑specific paths and metadata
-    # ------------------------------------------------------------------
     if args.detect:
         meta = detect_metadata(args.detect)
         provider_name = args.provider or meta["provider"]
@@ -230,8 +236,8 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
             LOGGER.error("Category missing in responses file – cannot locate questions file")
             sys.exit(1)
         questions_file = Path("questions") / f"{category}.jsonl"
-        responses_path = args.detect  # overwrite same file
-    else:  # normal mode
+        responses_path = args.detect
+    else:
         if not (args.questions and args.provider and args.model):
             LOGGER.error("--questions, --provider and --model are required in normal mode")
             sys.exit(1)
@@ -245,24 +251,23 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
 
     responses_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # ------------------------------------------------------------------
-    # ModelCatalog resolution / update plus overrides
-    # ------------------------------------------------------------------
     catalog = ModelCatalog(args.catalog)
     canonical_name, provider_name, api_model = resolve_catalog_entry(
         catalog, canonical_cli, provider_name, api_model
     )
 
+    if args.force_subprovider and provider_name != "openrouter":
+        LOGGER.error("--force-subprovider is only supported with provider=openrouter")
+        sys.exit(1)
+
     catalog_entry = catalog.get_model(canonical_name) if canonical_name else None
     overrides: Dict[str, Any] = dict(catalog_entry.get_request_overrides()) if catalog_entry else {}
 
-    # Merge CLI flags
     if args.reasoning_tokens is not None:
         overrides.setdefault("reasoning", {})["max_tokens"] = args.reasoning_tokens
     if args.reasoning_effort is not None:
         overrides["effort"] = args.reasoning_effort
 
-    # Persist mapping when fully specified on CLI
     if args.canonical_name and args.provider and args.model:
         catalog.add_or_update_model(
             canonical_name=args.canonical_name,
@@ -272,54 +277,52 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         )
         catalog.save_catalog()
 
-    # ------------------------------------------------------------------
-    # Log final configuration summary (useful in loops)
-    # ------------------------------------------------------------------
     system_prompt_info = f"system_prompt={len(args.system_prompt)} chars" if args.system_prompt else "system_prompt=none"
+    subprov_info = f"subprov={args.force_subprovider or '<auto>'}"
     LOGGER.info(
-        "Configuration → model=%s (canon=%s) provider=%s questions=%s overrides=%s %s",
+        "Configuration → model=%s (canon=%s) provider=%s %s questions=%s overrides=%s %s",
         api_model,
         canonical_name or "<none>",
         provider_name,
+        subprov_info,
         questions_file.name,
         overrides if overrides else "<none>",
         system_prompt_info,
     )
 
-    # ------------------------------------------------------------------
-    # FRPE cleanup & establish done‑set
-    # ------------------------------------------------------------------
     if args.frpe:
         kept_rows = clean_frpe(responses_path)
         done_ids = {row.question_id for row in kept_rows}
     else:
         done_ids = {row.question_id for row in load_model_responses(responses_path)}
 
-    # ------------------------------------------------------------------
-    # Load questions and filter pending ones
-    # ------------------------------------------------------------------
     questions = load_questions(questions_file)
-    pending_questions = [question for question in questions if question.id not in done_ids]
+    pending_questions = [q for q in questions if q.id not in done_ids]
 
     LOGGER.info("Questions: total=%d pending=%d", len(questions), len(pending_questions))
-
     if not pending_questions:
         LOGGER.info("Nothing to do – all questions already answered")
         return
 
-    # ------------------------------------------------------------------
-    # Optional coherency tests (only when there is work to do)
-    # ------------------------------------------------------------------
     ignore_list: Optional[List[str]] = None
     if args.coherency:
         LOGGER.info("Running coherency tests …")
-        tests_passed, failed_subproviders = run_coherency_tests(api_model, provider_name)
-        if not tests_passed:
-            LOGGER.error("Coherency tests FAILED – aborting")
-            sys.exit(1)
-        if failed_subproviders:
-            ignore_list = failed_subproviders
-            LOGGER.info("OpenRouter: ignoring %s", ", ".join(ignore_list))
+        tests_passed, failed_subproviders = run_coherency_tests(
+            api_model,
+            provider_name,
+            openrouter_only=[args.force_subprovider] if args.force_subprovider else None,
+        )
+        if args.force_subprovider:
+            if failed_subproviders and args.force_subprovider in failed_subproviders:
+                LOGGER.error("Coherency failed for forced subprovider '%s' – aborting", args.force_subprovider)
+                sys.exit(1)
+        else:
+            if not tests_passed:
+                LOGGER.error("Coherency tests FAILED – aborting")
+                sys.exit(1)
+            if failed_subproviders:
+                ignore_list = failed_subproviders
+                LOGGER.info("OpenRouter: ignoring %s", ", ".join(ignore_list))
 
     LOGGER.info("Processing → output=%s", responses_path)
 
@@ -330,12 +333,19 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     else:
         limiter = None
 
-    # ------------------------------------------------------------------
-    # ThreadPool execution (now passes system prompt)
-    # ------------------------------------------------------------------
     with ThreadPoolExecutor(max_workers=args.workers) as pool, tqdm(total=len(pending_questions)) as tqdm_bar:
         future_map = {
-            pool.submit(ask_worker, question, provider_name, api_model, ignore_list, limiter, overrides, args.system_prompt): question
+            pool.submit(
+                ask_worker,
+                question,
+                provider_name,
+                api_model,
+                ignore_list,
+                limiter,
+                overrides,
+                args.system_prompt,
+                args.force_subprovider,
+            ): question
             for question in pending_questions
         }
         for future in as_completed(future_map):
