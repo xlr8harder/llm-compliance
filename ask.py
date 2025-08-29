@@ -336,6 +336,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
             api_model,
             provider_name,
             openrouter_only=[args.force_subprovider] if args.force_subprovider else None,
+            num_workers=args.workers,
         )
         if args.force_subprovider:
             if failed_subproviders and args.force_subprovider in failed_subproviders:
