@@ -208,8 +208,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--catalog", type=Path, default=Path("model_catalog.jsonl"))
 
-    parser.add_argument("--reasoning-tokens", type=int, help="OpenRouter reasoning.max_tokens value")
-    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], help="OpenRouter effort level")
+    # Reasoning controls
+    parser.add_argument(
+        "--reasoning",
+        action="store_true",
+        help="Enable model reasoning. With OpenRouter, sets reasoning.enabled=true.",
+    )
+    parser.add_argument("--reasoning-tokens", type=int, help="Reasoning max_tokens budget")
+    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], help="Reasoning effort level")
+
     parser.add_argument("--system-prompt", help="System prompt to include in requests")
 
     parser.add_argument(
@@ -263,11 +270,29 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     catalog_entry = catalog.get_model(canonical_name) if canonical_name else None
     overrides: Dict[str, Any] = dict(catalog_entry.get_request_overrides()) if catalog_entry else {}
 
-    if args.reasoning_tokens is not None:
-        overrides.setdefault("reasoning", {})["max_tokens"] = args.reasoning_tokens
-    if args.reasoning_effort is not None:
-        overrides["effort"] = args.reasoning_effort
+    # Build unified reasoning payload
+    reasoning_cfg: Dict[str, Any] = dict(overrides.get("reasoning", {}))
 
+    if args.reasoning:
+        reasoning_cfg["enabled"] = True
+    if args.reasoning_tokens is not None:
+        reasoning_cfg["max_tokens"] = args.reasoning_tokens
+    if args.reasoning_effort is not None:
+        reasoning_cfg["effort"] = args.reasoning_effort
+
+    # Enforce "one of" rule for effort vs max_tokens
+    if "max_tokens" in reasoning_cfg and "effort" in reasoning_cfg:
+        LOGGER.error("Reasoning conflict: cannot set both --reasoning-tokens and --reasoning-effort.")
+        sys.exit(2)
+
+    # For OpenRouter, make the mode explicit by default
+    if provider_name == "openrouter":
+        reasoning_cfg.setdefault("enabled", False)
+
+    if reasoning_cfg:
+        overrides["reasoning"] = reasoning_cfg
+
+    # Persist catalog mapping if fully specified on CLI
     if args.canonical_name and args.provider and args.model:
         catalog.add_or_update_model(
             canonical_name=args.canonical_name,
