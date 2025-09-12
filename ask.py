@@ -106,6 +106,20 @@ def clean_frpe(responses_path: Path) -> List[ModelResponse]:
     return kept_rows
 
 
+def _print_final_state(responses_path: Path) -> None:
+    """Log and print a concise summary of the responses file.
+
+    Outputs total rows, apparent permanent errors, and prints the absolute
+    path as the final line for convenient copy/paste into judge_compliance.py.
+    """
+    rows = load_model_responses(responses_path)
+    total = len(rows)
+    errors = sum(1 for r in rows if not r.is_success())
+    # Print a concise summary line followed by the absolute path
+    print(f"SUMMARY total={total} apparent_errors={errors}")
+    print(str(responses_path.resolve()))
+
+
 def detect_metadata(responses_path: Path):
     for row in load_model_responses(responses_path):
         return {
@@ -301,7 +315,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         LOGGER.error("Reasoning conflict: cannot set both --reasoning-tokens and --reasoning-effort.")
         sys.exit(2)
 
-    # Only include a reasoning block when explicitly enabled/disabled
+    # Only include a reasoning block in overrides when explicitly enabled/disabled
     if "enabled" in reasoning_cfg:
         # If disabled, drop any stray budget keys
         if not reasoning_cfg["enabled"]:
@@ -320,6 +334,13 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         catalog.save_catalog()
 
     system_prompt_info = f"system_prompt={len(args.system_prompt)} chars" if args.system_prompt else "system_prompt=none"
+    
+    # Prepare request_overrides for this run. If neither --reasoning nor --no-reasoning
+    # was specified, omit the reasoning block entirely from the API request to avoid
+    # confusing models that don't support it.
+    request_overrides: Dict[str, Any] = dict(overrides) if overrides else {}
+    if not args.reasoning and not getattr(args, "no_reasoning", False):
+        request_overrides.pop("reasoning", None)
     subprov_info = f"subprov={args.force_subprovider or '<auto>'}"
     LOGGER.info(
         "Configuration → model=%s (canon=%s) provider=%s %s questions=%s overrides=%s %s",
@@ -328,7 +349,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         provider_name,
         subprov_info,
         questions_file.name,
-        overrides if overrides else "<none>",
+        request_overrides if request_overrides else "<none>",
         system_prompt_info,
     )
 
@@ -344,6 +365,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     LOGGER.info("Questions: total=%d pending=%d", len(questions), len(pending_questions))
     if not pending_questions:
         LOGGER.info("Nothing to do – all questions already answered")
+        _print_final_state(responses_path)
         return
 
     ignore_list: Optional[List[str]] = None
@@ -354,7 +376,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
             provider_name,
             openrouter_only=[args.force_subprovider] if args.force_subprovider else None,
             num_workers=args.workers,
-            request_overrides=overrides if overrides else None,
+            request_overrides=request_overrides if request_overrides else None,
         )
         if args.force_subprovider:
             if failed_subproviders and args.force_subprovider in failed_subproviders:
@@ -386,7 +408,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
                 api_model,
                 ignore_list,
                 limiter,
-                overrides,
+                request_overrides,
                 args.system_prompt,
                 args.force_subprovider,
             ): question
@@ -420,6 +442,9 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
             len(pending_questions),
             len(load_model_responses(responses_path)),
         )
+
+    # Print final state summary and absolute path for convenience
+    _print_final_state(responses_path)
 
 
 if __name__ == "__main__":
