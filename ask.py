@@ -208,14 +208,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--catalog", type=Path, default=Path("model_catalog.jsonl"))
 
-    # Reasoning controls
-    parser.add_argument(
+    # Reasoning controls (mutually exclusive enable/disable)
+    rgroup = parser.add_mutually_exclusive_group()
+    rgroup.add_argument(
         "--reasoning",
         action="store_true",
-        help="Enable model reasoning. With OpenRouter, sets reasoning.enabled=true.",
+        help="Enable model reasoning (sets reasoning.enabled=true where supported)",
     )
-    parser.add_argument("--reasoning-tokens", type=int, help="Reasoning max_tokens budget")
-    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], help="Reasoning effort level")
+    rgroup.add_argument(
+        "--no-reasoning",
+        dest="no_reasoning",
+        action="store_true",
+        help="Disable model reasoning (sets reasoning.enabled=false where supported)",
+    )
+    parser.add_argument("--reasoning-tokens", type=int, help="Reasoning max_tokens budget (requires --reasoning)")
+    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], help="Reasoning effort level (requires --reasoning)")
 
     parser.add_argument("--system-prompt", help="System prompt to include in requests")
 
@@ -273,23 +280,33 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     # Build unified reasoning payload
     reasoning_cfg: Dict[str, Any] = dict(overrides.get("reasoning", {}))
 
+    # CLI toggles override catalog defaults
     if args.reasoning:
         reasoning_cfg["enabled"] = True
-    if args.reasoning_tokens is not None:
-        reasoning_cfg["max_tokens"] = args.reasoning_tokens
-    if args.reasoning_effort is not None:
-        reasoning_cfg["effort"] = args.reasoning_effort
+    elif getattr(args, "no_reasoning", False):
+        reasoning_cfg["enabled"] = False
 
-    # Enforce "one of" rule for effort vs max_tokens
-    if "max_tokens" in reasoning_cfg and "effort" in reasoning_cfg:
+    # Validate option usage and apply values only when enabled
+    if (args.reasoning_tokens is not None or args.reasoning_effort is not None) and not reasoning_cfg.get("enabled"):
+        LOGGER.error("Reasoning options require --reasoning. Specify --reasoning to enable thinking mode.")
+        sys.exit(2)
+    if reasoning_cfg.get("enabled"):
+        if args.reasoning_tokens is not None:
+            reasoning_cfg["max_tokens"] = args.reasoning_tokens
+        if args.reasoning_effort is not None:
+            reasoning_cfg["effort"] = args.reasoning_effort
+
+    # Enforce one-of rule for effort vs max_tokens
+    if reasoning_cfg.get("enabled") and ("max_tokens" in reasoning_cfg and "effort" in reasoning_cfg):
         LOGGER.error("Reasoning conflict: cannot set both --reasoning-tokens and --reasoning-effort.")
         sys.exit(2)
 
-    # For OpenRouter, make the mode explicit by default
-    if provider_name == "openrouter":
-        reasoning_cfg.setdefault("enabled", False)
-
-    if reasoning_cfg:
+    # Only include a reasoning block when explicitly enabled/disabled
+    if "enabled" in reasoning_cfg:
+        # If disabled, drop any stray budget keys
+        if not reasoning_cfg["enabled"]:
+            reasoning_cfg.pop("max_tokens", None)
+            reasoning_cfg.pop("effort", None)
         overrides["reasoning"] = reasoning_cfg
 
     # Persist catalog mapping if fully specified on CLI
@@ -337,6 +354,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
             provider_name,
             openrouter_only=[args.force_subprovider] if args.force_subprovider else None,
             num_workers=args.workers,
+            request_overrides=overrides if overrides else None,
         )
         if args.force_subprovider:
             if failed_subproviders and args.force_subprovider in failed_subproviders:
