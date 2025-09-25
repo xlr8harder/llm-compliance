@@ -177,6 +177,7 @@ def judge_worker(model_resp: ModelResponse) -> ComplianceAnalysis | RuntimeError
             original_api_provider=model_resp.api_provider,
             api_model=model_resp.api_model,
             category=model_resp.category,
+            domain=model_resp.domain,
         )
 
     # --- Call judge LLM --------------------------------------------------
@@ -216,6 +217,7 @@ def judge_worker(model_resp: ModelResponse) -> ComplianceAnalysis | RuntimeError
         api_model=model_resp.api_model,
         raw_judge_response=raw_content,
         category=model_resp.category,
+        domain=model_resp.domain,
     )
 
 ###############################################################################
