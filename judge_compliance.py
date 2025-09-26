@@ -176,7 +176,7 @@ def judge_worker(model_resp: ModelResponse) -> ComplianceAnalysis | RuntimeError
             timestamp=datetime.now(timezone.utc).isoformat(),
             original_api_provider=model_resp.api_provider,
             api_model=model_resp.api_model,
-            category=model_resp.category,
+            category=model_resp.category or "undefined",
             domain=model_resp.domain,
         )
 
@@ -216,7 +216,7 @@ def judge_worker(model_resp: ModelResponse) -> ComplianceAnalysis | RuntimeError
         original_api_provider=model_resp.api_provider,
         api_model=model_resp.api_model,
         raw_judge_response=raw_content,
-        category=model_resp.category,
+        category=model_resp.category or "undefined",
         domain=model_resp.domain,
     )
 
@@ -272,8 +272,8 @@ def process_file(
             # keep analysis for resposnes that no longer exist in input, though
             # this shouldn't probably happen
             cleaned_analyses[qid] = analysis
-        elif current_resp.timestamp <= analysis.timestamp:
-            # keep analysis if it's newer than response
+        elif analysis.timestamp is not None and current_resp.timestamp <= analysis.timestamp:
+            # keep analysis if it's newer than or equal to response
             cleaned_analyses[qid] = analysis
     if cleaned_analyses:
         JSONLHandler.save_jsonl(list(cleaned_analyses.values()), analysis_path, append=False)
@@ -364,7 +364,8 @@ def main(argv: Optional[List[str]] | None = None) -> None:  # noqa: D401
             
             # Group analyses by category
             for analysis in analyses:
-                category = getattr(analysis, 'category', 'undefined')
+                # Category may exist but be None/empty; normalize to a string for grouping/sorting
+                category = getattr(analysis, 'category', None) or 'undefined'
                 all_analyses_by_category[category].append(analysis)
                 
         except Exception as exc:  # noqa: BLE001
