@@ -97,11 +97,42 @@ def load_model_responses(file_path: Path) -> List[ModelResponse]:
     return JSONLHandler.load_jsonl(file_path, ModelResponse)
 
 
+def _is_empty_response(row: ModelResponse) -> bool:
+    """Return True when the ModelResponse.response payload is empty.
+
+    This specifically targets the observed "response": {} rows which should be
+    treated as permanent errors for retry/cleanup purposes.
+    """
+    try:
+        # Empty dict {}, None, or other falsy non-dict should be considered empty
+        return not bool(row.response)
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def clean_frpe(responses_path: Path) -> List[ModelResponse]:
     existing_rows = load_model_responses(responses_path)
-    kept_rows = [row for row in existing_rows if row.is_success()]
-    if len(kept_rows) != len(existing_rows):
-        LOGGER.info("FRPE: removed %d permanent-error rows", len(existing_rows) - len(kept_rows))
+    kept_rows: List[ModelResponse] = []
+    removed_empty = 0
+    removed_error = 0
+
+    for row in existing_rows:
+        if _is_empty_response(row):
+            removed_empty += 1
+            continue
+        if not row.is_success():
+            removed_error += 1
+            continue
+        kept_rows.append(row)
+
+    removed_total = removed_empty + removed_error
+    if removed_total:
+        LOGGER.info(
+            "FRPE: removed %d rows (errors=%d, empty_response=%d)",
+            removed_total,
+            removed_error,
+            removed_empty,
+        )
     JSONLHandler.save_jsonl(kept_rows, responses_path, append=False)
     return kept_rows
 
@@ -114,7 +145,8 @@ def _print_final_state(responses_path: Path) -> None:
     """
     rows = load_model_responses(responses_path)
     total = len(rows)
-    errors = sum(1 for r in rows if not r.is_success())
+    # Count as apparent errors both schema-detected permanent errors and empty payloads
+    errors = sum(1 for r in rows if _is_empty_response(r) or not r.is_success())
     # Print a concise summary line followed by the absolute path
     print(f"SUMMARY total={total} apparent_errors={errors}")
     print(str(responses_path.resolve()))
@@ -377,6 +409,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
             openrouter_only=[args.force_subprovider] if args.force_subprovider else None,
             num_workers=args.workers,
             request_overrides=request_overrides if request_overrides else None,
+            verbose=True,
         )
         if args.force_subprovider:
             if failed_subproviders and args.force_subprovider in failed_subproviders:
@@ -422,6 +455,19 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
             except Exception as exc:  # noqa: BLE001
                 LOGGER.exception("Worker raised for QID %s: %s", question.id, exc)
                 continue
+
+            # Defensive logging: sometimes providers return an empty payload ({}).
+            # Keep a record but surface a warning so FRPE can cleanly retry later.
+            try:
+                if not api_response.raw_provider_response:
+                    LOGGER.warning(
+                        "Empty provider response for QID %s (model=%s provider=%s) — recorded for FRPE",
+                        question.id,
+                        api_model,
+                        provider_name,
+                    )
+            except Exception:  # noqa: BLE001
+                pass
 
             model_response = ModelResponse(
                 question_id=question.id,
