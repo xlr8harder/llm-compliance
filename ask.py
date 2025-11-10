@@ -28,6 +28,9 @@ from typing import List, Optional, Dict, Any
 import threading
 import time
 from collections import deque
+import hmac
+import hashlib
+import base64
 
 from tqdm import tqdm  # type: ignore
 
@@ -50,6 +53,57 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+# Human-readable anonymized model names
+ADJECTIVES: List[str] = [
+    "brisk", "calm", "clever", "bold", "bright", "brave", "swift", "silent",
+    "gentle", "keen", "lively", "mellow", "noble", "quiet", "rapid", "sharp",
+    "shy", "smart", "solid", "steady", "still", "strong", "sure", "tender",
+    "true", "vivid", "witty", "young", "zesty", "agile", "apt", "blithe",
+    "candid", "crisp", "eager", "fierce", "glad", "grand", "humble", "just",
+    "light", "mild", "neat", "quick", "spry", "stark", "urban", "vast",
+    "warm", "wise", "spruce", "sturdy", "plucky", "sunny", "cosy", "tidy",
+    "dapper", "elegant", "fluent", "graceful", "jolly", "nimble", "polished",
+    "sincere",
+]
+
+NOUNS: List[str] = [
+    "sparrow", "falcon", "eagle", "owl", "robin", "raven", "heron", "swan",
+    "crane", "stork", "goose", "duck", "wren", "finch", "ibis", "hawk",
+    "tiger", "lion", "leopard", "panther", "cougar", "jaguar", "lynx", "puma",
+    "wolf", "fox", "bear", "otter", "beaver", "badger", "weasel", "raccoon",
+    "moose", "elk", "deer", "antelope", "bison", "buffalo", "camel", "llama",
+    "alpaca", "goat", "sheep", "cow", "bull", "horse", "zebra", "donkey",
+    "yak", "boar", "pig", "hare", "rabbit", "mouse", "rat", "squirrel",
+    "hamster", "mole", "hedgehog", "bat", "dolphin", "whale", "shark", "seal",
+    "walrus", "eel", "trout", "salmon", "tuna", "cod", "perch", "carp",
+    "pike", "mackerel", "anchovy", "sardine", "octopus", "squid", "crab",
+    "lobster", "shrimp", "ant", "bee", "wasp", "beetle", "moth", "butterfly",
+    "dragonfly", "spider", "firefly", "termite", "fly", "gnat", "mosquito",
+    "locust", "mantis", "cicada", "snake", "python", "cobra", "viper", "gecko",
+    "lizard", "iguana", "turtle", "tortoise", "alligator", "crocodile", "newt",
+    "salamander", "frog", "toad", "skink", "river", "forest", "mountain",
+    "valley", "ocean", "desert", "island", "harbor", "meadow", "garden",
+    "canyon", "prairie", "tundra", "glacier", "lagoon", "reef",
+]
+
+def _derive_pseudonym(secret: str, model_id: str) -> str:
+    """Derive a short, human‑readable, stable pseudonym from secret+model.
+
+    Uses HMAC-SHA256(secret, model_id) as the entropy source, maps to
+    adjective-noun plus a 2-char base32 suffix to reduce collisions while
+    keeping names short.
+    """
+    digest = hmac.new(secret.encode("utf-8"), model_id.encode("utf-8"), hashlib.sha256).digest()
+    # Three 32-bit chunks for word indices
+    a_idx = int.from_bytes(digest[0:4], "big") % len(ADJECTIVES)
+    n1_idx = int.from_bytes(digest[4:8], "big") % len(NOUNS)
+    n2_idx = int.from_bytes(digest[8:12], "big") % len(NOUNS)
+    # Base32 suffix from remaining bytes (letters and digits, lowercased)
+    # Using 7 chars → 35 bits; with 3 words (~6 + 7 + 7 bits) total ≈ 55 bits.
+    b32 = base64.b32encode(digest[12:]).decode("ascii").lower().rstrip("=")
+    suffix = b32[:7]
+    return f"{ADJECTIVES[a_idx]}-{NOUNS[n1_idx]}-{NOUNS[n2_idx]}-{suffix}"
 
 ###############################################################################
 # RateLimiter helper
@@ -334,7 +388,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
 
     # Prepare anonymized naming if requested
     secret_value: Optional[str] = None
-    hashed_model_name: Optional[str] = None
+    anon_model_name: Optional[str] = None
     if anonymize:
         secret_path = Path(".secret")
         if not secret_path.exists():
@@ -344,11 +398,8 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         if not secret_value:
             LOGGER.error(".secret exists but is empty – cannot anonymize")
             sys.exit(1)
-        import hashlib, hmac
-
-        # Use HMAC-SHA256(secret, api_model) to derive a stable identifier
-        digest = hmac.new(secret_value.encode("utf-8"), api_model.encode("utf-8"), hashlib.sha256).hexdigest()
-        hashed_model_name = digest[:24]
+        # Derive a readable, stable pseudonym
+        anon_model_name = _derive_pseudonym(secret_value, api_model)
 
     # Compute responses_path now that we know if anonymization applies (normal mode only)
     if not args.detect:
@@ -356,8 +407,8 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         if args.out:
             responses_path = args.out
         else:
-            if anonymize and hashed_model_name:
-                safe_model = hashed_model_name
+            if anonymize and anon_model_name:
+                safe_model = anon_model_name
             else:
                 safe_model = (canonical_cli or api_model).replace("/", "_")
             responses_path = Path("responses") / f"{stem}_{safe_model}.jsonl"
@@ -425,8 +476,8 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     subprov_info = f"subprov={args.force_subprovider or '<auto>'}"
     LOGGER.info(
         "Configuration → model=%s (canon=%s) provider=%s %s questions=%s overrides=%s %s anonymize=%s",
-        api_model,
-        (hashed_model_name or canonical_name or "<none>") if anonymize else (canonical_name or "<none>"),
+        api_model if not anonymize else "<anon>",
+        (anon_model_name or canonical_name or "<none>") if anonymize else (canonical_name or "<none>"),
         provider_name,
         subprov_info,
         questions_file.name,
@@ -522,7 +573,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
             model_response = ModelResponse(
                 question_id=question.id,
                 question=question.question,
-                model=(hashed_model_name or (canonical_name or api_model)) if anonymize else (canonical_name or api_model),
+                model=(anon_model_name or (canonical_name or api_model)) if anonymize else (canonical_name or api_model),
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 response=api_response.raw_provider_response,
                 api_provider=None if anonymize else provider_name,
