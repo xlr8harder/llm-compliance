@@ -5,3 +5,4 @@ __pycache__
 .env.*
 !.env.example
 .lexical_diversity_cache.pkl
+.secret
