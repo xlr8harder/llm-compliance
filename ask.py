@@ -241,6 +241,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", type=Path, help="output JSONL path (normal mode)")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--frpe", action="store_true", help="clean permanent errors before retrying")
+    parser.add_argument(
+        "--anonymize",
+        action="store_true",
+        help=(
+            "Record only a stable, secret-hashed model identifier in outputs. "
+            "If the questions filename starts with 'anon', anonymization is enabled by default."
+        ),
+    )
 
     parser.add_argument("--rate-limit", type=int, default=0, help="Max requests allowed per period (0 = unlimited)")
     parser.add_argument("--rate-period", type=float, default=60.0, help="Window size in seconds for --rate-limit")
@@ -286,6 +294,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     args = build_arg_parser().parse_args(argv)
 
+    # Enable anonymization by default when the questions file starts with 'anon'
+    # (normal mode only — detect mode relies on an existing responses file name)
+    anonymize = bool(args.anonymize)
+
     if args.detect:
         meta = detect_metadata(args.detect)
         provider_name = args.provider or meta["provider"]
@@ -294,6 +306,12 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         category = meta["category"]
         if not category:
             LOGGER.error("Category missing in responses file – cannot locate questions file")
+            sys.exit(1)
+        if not (provider_name and api_model):
+            LOGGER.error(
+                "Cannot infer provider/model from detected file. "
+                "If the file was anonymized, supply --provider and --model explicitly."
+            )
             sys.exit(1)
         questions_file = Path("questions") / f"{category}.jsonl"
         responses_path = args.detect
@@ -305,16 +323,47 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         api_model = args.model
         canonical_cli = args.canonical_name
         questions_file = args.questions
-        stem = questions_file.stem
-        safe_model = (canonical_cli or api_model).replace("/", "_")
-        responses_path = args.out or Path("responses") / f"{stem}_{safe_model}.jsonl"
-
-    responses_path.parent.mkdir(parents=True, exist_ok=True)
+        # Default-on anonymization if filename starts with 'anon'
+        if questions_file.name.startswith("anon"):
+            anonymize = True
 
     catalog = ModelCatalog(args.catalog)
     canonical_name, provider_name, api_model = resolve_catalog_entry(
         catalog, canonical_cli, provider_name, api_model
     )
+
+    # Prepare anonymized naming if requested
+    secret_value: Optional[str] = None
+    hashed_model_name: Optional[str] = None
+    if anonymize:
+        secret_path = Path(".secret")
+        if not secret_path.exists():
+            LOGGER.error("--anonymize requires a secret file at .secret")
+            sys.exit(1)
+        secret_value = secret_path.read_text(encoding="utf-8").strip()
+        if not secret_value:
+            LOGGER.error(".secret exists but is empty – cannot anonymize")
+            sys.exit(1)
+        import hashlib, hmac
+
+        # Use HMAC-SHA256(secret, api_model) to derive a stable identifier
+        digest = hmac.new(secret_value.encode("utf-8"), api_model.encode("utf-8"), hashlib.sha256).hexdigest()
+        hashed_model_name = digest[:24]
+
+    # Compute responses_path now that we know if anonymization applies (normal mode only)
+    if not args.detect:
+        stem = questions_file.stem
+        if args.out:
+            responses_path = args.out
+        else:
+            if anonymize and hashed_model_name:
+                safe_model = hashed_model_name
+            else:
+                safe_model = (canonical_cli or api_model).replace("/", "_")
+            responses_path = Path("responses") / f"{stem}_{safe_model}.jsonl"
+
+    # Ensure output directory exists now that responses_path is finalized
+    responses_path.parent.mkdir(parents=True, exist_ok=True)
 
     if args.force_subprovider and provider_name != "openrouter":
         LOGGER.error("--force-subprovider is only supported with provider=openrouter")
@@ -375,14 +424,15 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         request_overrides.pop("reasoning", None)
     subprov_info = f"subprov={args.force_subprovider or '<auto>'}"
     LOGGER.info(
-        "Configuration → model=%s (canon=%s) provider=%s %s questions=%s overrides=%s %s",
+        "Configuration → model=%s (canon=%s) provider=%s %s questions=%s overrides=%s %s anonymize=%s",
         api_model,
-        canonical_name or "<none>",
+        (hashed_model_name or canonical_name or "<none>") if anonymize else (canonical_name or "<none>"),
         provider_name,
         subprov_info,
         questions_file.name,
         request_overrides if request_overrides else "<none>",
         system_prompt_info,
+        "on" if anonymize else "off",
     )
 
     if args.frpe:
@@ -472,11 +522,11 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
             model_response = ModelResponse(
                 question_id=question.id,
                 question=question.question,
-                model=canonical_name or api_model,
+                model=(hashed_model_name or (canonical_name or api_model)) if anonymize else (canonical_name or api_model),
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 response=api_response.raw_provider_response,
-                api_provider=provider_name,
-                api_model=api_model,
+                api_provider=None if anonymize else provider_name,
+                api_model=None if anonymize else api_model,
                 category=question.category,
                 domain=question.domain,
             )

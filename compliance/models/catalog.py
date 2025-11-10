@@ -247,7 +247,12 @@ class ModelCatalog:
                             return name, provider, provider_model_id
                 
                 # If not found, create a new entry with provider/model_id as canonical name
-                default_canonical = f"{provider}/{provider_model_id}"
+                # Special-case OpenRouter: treat its provider_model_id as the canonical name
+                # (e.g., "moonshotai/kimi-k2-thinking"), without the provider prefix.
+                # For other providers, use the historical "provider/model" canonical format.
+                default_canonical = (
+                    provider_model_id if provider == "openrouter" else f"{provider}/{provider_model_id}"
+                )
                 self.add_or_update_model(
                     canonical_name=default_canonical,
                     provider=provider,
