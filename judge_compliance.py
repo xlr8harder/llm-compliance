@@ -284,11 +284,21 @@ def process_file(
         LOGGER.info("Removed analysis file: will re-judge all entries")
     analyses_map = cleaned_analyses
 
-    # Work list: new or updated responses
+    # Work list: new, updated, or judge‑error responses
     to_judge: List[ModelResponse] = []
     for resp in model_responses:
         existing = analyses_map.get(resp.question_id)
-        if existing is None or resp.timestamp > existing.timestamp:
+        # Re‑judge if:
+        #   * there's no existing analysis,
+        #   * the response is newer than the last analysis, or
+        #   * the previous analysis indicates a judge‑side error (e.g. ERROR_JUDGE_FORMAT)
+        needs_rejudge_for_judge_error = False
+        if existing is not None:
+            compliance_code = getattr(existing, "compliance", "") or ""
+            if isinstance(compliance_code, str) and compliance_code.startswith("ERROR_JUDGE_"):
+                needs_rejudge_for_judge_error = True
+
+        if existing is None or resp.timestamp > existing.timestamp or needs_rejudge_for_judge_error:
             to_judge.append(resp)
 
     LOGGER.info(
