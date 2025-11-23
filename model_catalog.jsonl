@@ -86,3 +86,14 @@
 {"canonical_name": "openrouter/polaris-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/polaris-alpha", "priority": 0}]}
 {"canonical_name": "moonshotai/kimi-k2-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "moonshotai/kimi-k2-thinking", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "amazon/nova-premier-v1", "providers": [{"provider_name": "openrouter", "provider_model_id": "amazon/nova-premier-v1", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "openai/gpt-5.1-2025-11-13", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.1", "priority": 0}]}
+{"canonical_name": "openai/gpt-5.1-chat-2025-11-13", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.1-chat", "priority": 0}]}
+{"canonical_name": "openrouter/sherlock-dash-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/sherlock-dash-alpha", "priority": 0}]}
+{"canonical_name": "openrouter/sherlock-think-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/sherlock-think-alpha", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "google/gemini-3-pro-preview", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemini-3-pro-preview", "priority": 0}]}
+{"canonical_name": "allenai/olmo-3-32b-think", "providers": [{"provider_name": "openrouter", "provider_model_id": "allenai/olmo-3-32b-think", "priority": 0}]}
+{"canonical_name": "x-ai/grok-4.1-fast-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "x-ai/grok-4.1-fast", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "allenai/olmo-3-7b-think", "providers": [{"provider_name": "openrouter", "provider_model_id": "allenai/olmo-3-7b-think", "priority": 0}]}
+{"canonical_name": "allenai/olmo-3-7b-instruct", "providers": [{"provider_name": "openrouter", "provider_model_id": "allenai/olmo-3-7b-instruct", "priority": 0}]}
+{"canonical_name": "allenai/olmo-2-0325-32b-instruct", "providers": [{"provider_name": "openrouter", "provider_model_id": "allenai/olmo-2-0325-32b-instruct", "priority": 0}]}
+{"canonical_name": "x-ai/grok-4.1-fast", "providers": [{"provider_name": "openrouter", "provider_model_id": "x-ai/grok-4.1-fast", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
