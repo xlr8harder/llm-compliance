@@ -97,3 +97,6 @@
 {"canonical_name": "allenai/olmo-3-7b-instruct", "providers": [{"provider_name": "openrouter", "provider_model_id": "allenai/olmo-3-7b-instruct", "priority": 0}]}
 {"canonical_name": "allenai/olmo-2-0325-32b-instruct", "providers": [{"provider_name": "openrouter", "provider_model_id": "allenai/olmo-2-0325-32b-instruct", "priority": 0}]}
 {"canonical_name": "x-ai/grok-4.1-fast", "providers": [{"provider_name": "openrouter", "provider_model_id": "x-ai/grok-4.1-fast", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "anthropic/claude-opus-4.5", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4.5", "priority": 0}]}
+{"canonical_name": "anthropic/claude-opus-4.5-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4.5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "anthropic/claude-opus-4.1-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4.1", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
