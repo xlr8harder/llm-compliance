@@ -100,3 +100,5 @@
 {"canonical_name": "anthropic/claude-opus-4.5", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4.5", "priority": 0}]}
 {"canonical_name": "anthropic/claude-opus-4.5-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4.5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "anthropic/claude-opus-4.1-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4.1", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "anthropic/claude-haiku-4.5", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-haiku-4.5", "priority": 0}]}
+{"canonical_name": "anthropic/claude-haiku-4.5-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-haiku-4.5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
