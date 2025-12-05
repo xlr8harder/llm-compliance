@@ -294,6 +294,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--out", type=Path, help="output JSONL path (normal mode)")
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--max-tokens", type=int, help="Max completion tokens for each answer (unset by default)")
     parser.add_argument("--frpe", action="store_true", help="clean permanent errors before retrying")
     parser.add_argument(
         "--anonymize",
@@ -473,6 +474,8 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     request_overrides: Dict[str, Any] = dict(overrides) if overrides else {}
     if not args.reasoning and not getattr(args, "no_reasoning", False):
         request_overrides.pop("reasoning", None)
+    if args.max_tokens is not None:
+        request_overrides["max_tokens"] = args.max_tokens
     subprov_info = f"subprov={args.force_subprovider or '<auto>'}"
     LOGGER.info(
         "Configuration → model=%s (canon=%s) provider=%s %s questions=%s overrides=%s %s anonymize=%s",
