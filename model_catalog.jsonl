@@ -111,3 +111,4 @@
 {"canonical_name": "mistralai/ministral-8b-2512", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/ministral-8b-2512", "priority": 0}]}
 {"canonical_name": "mistralai/ministral-3b-2512", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/ministral-3b-2512", "priority": 0}]}
 {"canonical_name": "amazon/nova-2-lite-v1", "providers": [{"provider_name": "openrouter", "provider_model_id": "amazon/nova-2-lite-v1", "priority": 0}]}
+{"canonical_name": "arcee-ai/trinity-mini", "providers": [{"provider_name": "openrouter", "provider_model_id": "arcee-ai/trinity-mini", "priority": 0}]}
