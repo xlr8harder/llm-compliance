@@ -107,3 +107,7 @@
 {"canonical_name": "deepseek/deepseek-v3.2", "providers": [{"provider_name": "openrouter", "provider_model_id": "deepseek/deepseek-v3.2", "priority": 0}]}
 {"canonical_name": "deepseek/deepseek-v3.2-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "deepseek/deepseek-v3.2", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "mistralai/mistral-large-2512", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/mistral-large-2512", "priority": 0}]}
+{"canonical_name": "mistralai/ministral-14b-2512", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/ministral-14b-2512", "priority": 0}]}
+{"canonical_name": "mistralai/ministral-8b-2512", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/ministral-8b-2512", "priority": 0}]}
+{"canonical_name": "mistralai/ministral-3b-2512", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/ministral-3b-2512", "priority": 0}]}
+{"canonical_name": "amazon/nova-2-lite-v1", "providers": [{"provider_name": "openrouter", "provider_model_id": "amazon/nova-2-lite-v1", "priority": 0}]}
