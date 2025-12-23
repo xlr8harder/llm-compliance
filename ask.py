@@ -331,7 +331,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Disable model reasoning (sets reasoning.enabled=false where supported)",
     )
     parser.add_argument("--reasoning-tokens", type=int, help="Reasoning max_tokens budget (requires --reasoning)")
-    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high", "none"], help="Reasoning effort level (requires --reasoning)")
+    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], help="Reasoning effort level (requires --reasoning)")
 
     parser.add_argument("--system-prompt", help="System prompt to include in requests")
 
@@ -435,9 +435,8 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
 
     # Validate option usage and apply values only when enabled
     if (args.reasoning_tokens is not None or args.reasoning_effort is not None) and not reasoning_cfg.get("enabled"):
-        if args.reasoning_effort != "none":
-            LOGGER.error("Reasoning options require --reasoning. Specify --reasoning to enable thinking mode.")
-            sys.exit(2)
+        LOGGER.error("Reasoning options require --reasoning. Specify --reasoning to enable thinking mode.")
+        sys.exit(2)
     if reasoning_cfg.get("enabled"):
         if args.reasoning_tokens is not None:
             reasoning_cfg["max_tokens"] = args.reasoning_tokens
