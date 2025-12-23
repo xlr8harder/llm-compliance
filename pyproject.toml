@@ -1,0 +1,20 @@
+[project]
+name = "llm-compliance"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "llm-client",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.0",
+    "pandas>=2.3.3",
+    "plotly>=6.5.0",
+    "python-dotenv>=1.0.1",
+    "requests>=2.32.5",
+    "streamlit>=1.52.2",
+    "tqdm>=4.67.1",
+]
+
+[tool.uv.sources]
+llm-client = { git = "https://github.com/xlr8harder/llm_client.git", rev = "main" }

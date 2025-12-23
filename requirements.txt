@@ -1,9 +1,0 @@
-requests
-pandas
-matplotlib
-numpy
-streamlit
-pandas
-plotly
-git+https://github.com/xlr8harder/llm_client.git@main
-python-dotenv>=1.0.1
