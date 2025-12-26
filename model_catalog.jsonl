@@ -112,3 +112,15 @@
 {"canonical_name": "mistralai/ministral-3b-2512", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/ministral-3b-2512", "priority": 0}]}
 {"canonical_name": "amazon/nova-2-lite-v1", "providers": [{"provider_name": "openrouter", "provider_model_id": "amazon/nova-2-lite-v1", "priority": 0}]}
 {"canonical_name": "arcee-ai/trinity-mini", "providers": [{"provider_name": "openrouter", "provider_model_id": "arcee-ai/trinity-mini", "priority": 0}]}
+{"canonical_name": "tngtech/tng-r1t-chimera", "providers": [{"provider_name": "openrouter", "provider_model_id": "tngtech/tng-r1t-chimera:free", "priority": 0}, {"provider_name": "openrouter", "provider_model_id": "tngtech/tng-r1t-chimera", "priority": 0}]}
+{"canonical_name": "z-ai/glm-4.6v", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-4.6v", "priority": 0}]}
+{"canonical_name": "essentialai/rnj-1-instruct", "providers": [{"provider_name": "openrouter", "provider_model_id": "essentialai/rnj-1-instruct", "priority": 0}]}
+{"canonical_name": "openai/gpt-5.2-chat", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.2-chat", "priority": 0}]}
+{"canonical_name": "openai/gpt-5.2", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.2", "priority": 0}]}
+{"canonical_name": "nvidia/nemotron-3-nano-30b-a3b:free", "providers": [{"provider_name": "openrouter", "provider_model_id": "nvidia/nemotron-3-nano-30b-a3b:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "nvidia/nemotron-3-nano-30b-a3b", "providers": [{"provider_name": "openrouter", "provider_model_id": "nvidia/nemotron-3-nano-30b-a3b:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "mistralai/mistral-small-creative", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/mistral-small-creative", "priority": 0}]}
+{"canonical_name": "xiaomi/mimo-v2-flash-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "xiaomi/mimo-v2-flash:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "allenai/olmo-3.1-32b-think", "providers": [{"provider_name": "openrouter", "provider_model_id": "allenai/olmo-3.1-32b-think:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "google/gemini-3-flash-preview-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemini-3-flash-preview", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "google/gemini-3-flash-preview", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemini-3-flash-preview", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
