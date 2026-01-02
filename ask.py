@@ -34,6 +34,11 @@ import base64
 
 from tqdm import tqdm  # type: ignore
 
+try:
+    import fcntl  # Unix-only file locking
+except ImportError:  # pragma: no cover - non-Unix platforms
+    fcntl = None
+
 # ---------------------------------------------------------------------------
 # compliance layer
 # ---------------------------------------------------------------------------
@@ -204,6 +209,22 @@ def _print_final_state(responses_path: Path) -> None:
     # Print a concise summary line followed by the absolute path
     print(f"SUMMARY total={total} apparent_errors={errors}")
     print(str(responses_path.resolve()))
+
+
+def acquire_responses_lock(responses_path: Path):
+    """Prevent concurrent writers for the same responses file."""
+    if fcntl is None:
+        LOGGER.warning("File locking not available; proceeding without a lock")
+        return None
+    # Lock the responses file itself to avoid creating extra lock files.
+    lock_file = responses_path.open("a", encoding="utf-8")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        LOGGER.error("Responses file is locked: %s", responses_path)
+        lock_file.close()
+        sys.exit(1)
+    return lock_file
 
 
 def detect_metadata(responses_path: Path):
@@ -416,6 +437,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
 
     # Ensure output directory exists now that responses_path is finalized
     responses_path.parent.mkdir(parents=True, exist_ok=True)
+    _responses_lock = acquire_responses_lock(responses_path)
 
     if args.force_subprovider and provider_name != "openrouter":
         LOGGER.error("--force-subprovider is only supported with provider=openrouter")

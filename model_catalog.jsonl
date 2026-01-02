@@ -124,3 +124,5 @@
 {"canonical_name": "allenai/olmo-3.1-32b-think", "providers": [{"provider_name": "openrouter", "provider_model_id": "allenai/olmo-3.1-32b-think:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "google/gemini-3-flash-preview-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemini-3-flash-preview", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "google/gemini-3-flash-preview", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemini-3-flash-preview", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "bytedance/seed-1.6", "providers": [{"provider_name": "openrouter", "provider_model_id": "bytedance-seed/seed-1.6", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "bytedance/seed-1.6-flash", "providers": [{"provider_name": "openrouter", "provider_model_id": "bytedance-seed/seed-1.6-flash", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
