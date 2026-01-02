@@ -356,7 +356,7 @@ wheels = [
 [[package]]
 name = "llm-client"
 version = "0.1.19"
-source = { git = "https://github.com/xlr8harder/llm_client.git?rev=main#e4e7116e0a6cdd7108156a6976265a11aa90a6ae" }
+source = { git = "https://github.com/xlr8harder/llm_client.git#e4e7116e0a6cdd7108156a6976265a11aa90a6ae" }
 dependencies = [
     { name = "pytest" },
     { name = "urllib3" },
@@ -369,6 +369,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "llm-client" },
     { name = "matplotlib" },
+    { name = "mq" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "plotly" },
@@ -382,6 +383,7 @@ dependencies = [
 requires-dist = [
     { name = "llm-client", git = "https://github.com/xlr8harder/llm_client.git?rev=main" },
     { name = "matplotlib", specifier = ">=3.10.8" },
+    { name = "mq", git = "https://github.com/xlr8harder/mq.git" },
     { name = "numpy", specifier = ">=2.4.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "plotly", specifier = ">=6.5.0" },
@@ -488,6 +490,14 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/4d/4b/e7beb6bbd49f6bae727a12b270a2654d13c397576d25bd6786e47033300f/matplotlib-3.10.8-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:595ba4d8fe983b88f0eec8c26a241e16d6376fe1979086232f481f8f3f67494c", size = 9614011, upload-time = "2025-12-10T22:56:33.85Z" },
     { url = "https://files.pythonhosted.org/packages/7c/e6/76f2813d31f032e65f6f797e3f2f6e4aab95b65015924b1c51370395c28a/matplotlib-3.10.8-cp314-cp314t-win_amd64.whl", hash = "sha256:25d380fe8b1dc32cf8f0b1b448470a77afb195438bafdf1d858bfb876f3edf7b", size = 8362801, upload-time = "2025-12-10T22:56:36.107Z" },
     { url = "https://files.pythonhosted.org/packages/5d/49/d651878698a0b67f23aa28e17f45a6d6dd3d3f933fa29087fa4ce5947b5a/matplotlib-3.10.8-cp314-cp314t-win_arm64.whl", hash = "sha256:113bb52413ea508ce954a02c10ffd0d565f9c3bc7f2eddc27dfe1731e71c7b5f", size = 8192560, upload-time = "2025-12-10T22:56:38.008Z" },
+]
+
+[[package]]
+name = "mq"
+version = "0.2.3"
+source = { git = "https://github.com/xlr8harder/mq.git#322c25b174b9d3572b90e06e98fe7b1b5ae91325" }
+dependencies = [
+    { name = "llm-client" },
 ]
 
 [[package]]

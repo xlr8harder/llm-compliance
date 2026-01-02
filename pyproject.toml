@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "llm-client",
     "matplotlib>=3.10.8",
+    "mq",
     "numpy>=2.4.0",
     "pandas>=2.3.3",
     "plotly>=6.5.0",
@@ -18,3 +19,4 @@ dependencies = [
 
 [tool.uv.sources]
 llm-client = { git = "https://github.com/xlr8harder/llm_client.git", rev = "main" }
+mq = { git = "https://github.com/xlr8harder/mq.git" }
