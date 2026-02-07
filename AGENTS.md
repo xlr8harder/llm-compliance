@@ -15,6 +15,10 @@ as close to zero as practical, judging compliance, and publishing to Speechmap.
 - Pick workers (default to `--workers 30`).
 - Ensure the model is resolvable via `model_catalog.jsonl` or pass
   `--canonical-name`, `--provider`, and `--model` so `ask.py` can extend it.
+- Use longer timeouts for large operations in this repo:
+  - `ask.py` and `judge_compliance.py`: allow at least 60 minutes.
+  - `preprocess.py` in `../speechmap`: allow at least 30 minutes.
+  - `git` operations (add/commit/push): allow longer timeouts due to large files.
 - If not provided, ask:
   - Whether to use `--reasoning` or `--no-reasoning`.
   - The canonical model name (use the API name unless a more specific label is needed).
