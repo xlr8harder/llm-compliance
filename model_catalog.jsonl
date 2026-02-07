@@ -132,3 +132,6 @@
 {"canonical_name": "moonshotai/kimi-k2.5-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "moonshotai/kimi-k2.5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "arcee-ai/trinity-large-preview", "providers": [{"provider_name": "openrouter", "provider_model_id": "arcee-ai/trinity-large-preview:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "stepfun/step-3.5-flash", "providers": [{"provider_name": "openrouter", "provider_model_id": "stepfun/step-3.5-flash:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "anthropic/claude-opus-4.6", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4.6", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "openrouter/pony-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/pony-alpha", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "anthropic/claude-opus-4.6-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4.6", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}

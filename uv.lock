@@ -355,10 +355,11 @@ wheels = [
 
 [[package]]
 name = "llm-client"
-version = "0.1.19"
-source = { git = "https://github.com/xlr8harder/llm_client.git#e4e7116e0a6cdd7108156a6976265a11aa90a6ae" }
+version = "0.1.24"
+source = { git = "https://github.com/xlr8harder/llm_client.git#60dd837e8d039cf5cd572793bfc20d5a92a1d4d2" }
 dependencies = [
     { name = "pytest" },
+    { name = "requests" },
     { name = "urllib3" },
 ]
 
