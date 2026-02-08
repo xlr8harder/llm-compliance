@@ -42,12 +42,16 @@ uv run python ask.py \
   --reasoning
 ```
 Notes:
+- Do not pass `--out` for normal runs. Let `ask.py` auto-name files from the
+  question set and canonical model; use the printed output path in follow-up
+  commands.
 - If capacity errors are high, reduce `--workers` and retry.
 - Errors are recorded in the output JSONL and can be inspected for diagnostics.
 - Use `--force-subprovider` only when a particular subprovider is problematic
   (or if you observe one subprovider causing most errors).
 2) Sanity check the output:
    - `ask.py` prints `SUMMARY total=... apparent_errors=...` and the output path.
+     Copy that exact path (auto-named) for retries and judging.
    - Optional exact count:
 ```bash
 uv run python - <<'PY'
