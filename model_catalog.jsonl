@@ -135,3 +135,8 @@
 {"canonical_name": "anthropic/claude-opus-4.6", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4.6", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "openrouter/pony-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/pony-alpha", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "anthropic/claude-opus-4.6-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4.6", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "qwen/qwen3-max-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "qwen/qwen3-max-thinking", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "openrouter/aurora-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/aurora-alpha", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "z-ai/glm-5", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "z-ai/glm-5-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "minimax/minimax-m2.5", "providers": [{"provider_name": "openrouter", "provider_model_id": "minimax/minimax-m2.5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
