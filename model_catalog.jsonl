@@ -140,3 +140,6 @@
 {"canonical_name": "z-ai/glm-5", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "z-ai/glm-5-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "minimax/minimax-m2.5", "providers": [{"provider_name": "openrouter", "provider_model_id": "minimax/minimax-m2.5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "qwen/qwen3.5-plus-02-15", "providers": [{"provider_name": "openrouter", "provider_model_id": "qwen/qwen3.5-plus-02-15", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "anthropic/claude-sonnet-4.6", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-sonnet-4.6", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "anthropic/claude-sonnet-4.6-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-sonnet-4.6", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
