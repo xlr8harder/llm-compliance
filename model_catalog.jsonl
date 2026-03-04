@@ -143,3 +143,9 @@
 {"canonical_name": "qwen/qwen3.5-plus-02-15", "providers": [{"provider_name": "openrouter", "provider_model_id": "qwen/qwen3.5-plus-02-15", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "anthropic/claude-sonnet-4.6", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-sonnet-4.6", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "anthropic/claude-sonnet-4.6-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-sonnet-4.6", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "bytedance-seed/seed-2.0-mini", "providers": [{"provider_name": "openrouter", "provider_model_id": "bytedance-seed/seed-2.0-mini", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "qwen/qwen3.5-35b-a3b", "providers": [{"provider_name": "openrouter", "provider_model_id": "qwen/qwen3.5-35b-a3b", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "qwen/qwen3.5-27b", "providers": [{"provider_name": "openrouter", "provider_model_id": "qwen/qwen3.5-27b", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "qwen/qwen3.5-122b-a10b", "providers": [{"provider_name": "openrouter", "provider_model_id": "qwen/qwen3.5-122b-a10b", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "liquid/lfm-2-24b-a2b", "providers": [{"provider_name": "openrouter", "provider_model_id": "liquid/lfm-2-24b-a2b", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "qwen/qwen3.5-flash-02-23", "providers": [{"provider_name": "openrouter", "provider_model_id": "qwen/qwen3.5-flash-02-23", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
