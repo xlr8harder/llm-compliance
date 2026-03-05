@@ -105,6 +105,10 @@ PY
 ## Commit in llm-compliance
 - Stage only the relevant files: `responses/`, `analysis/`, and
   `model_catalog.jsonl` (if it changed).
+- Never commit a run with a very large error count. If errors are still high,
+  treat the run as failed and non-informative, then continue retries (`--frpe`
+  and/or judge retries) until errors are near-zero or clearly stabilized at a
+  small residual level.
 - Check file sizes before pushing:
 ```bash
 find responses analysis -type f -size +50M

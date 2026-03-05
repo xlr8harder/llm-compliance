@@ -151,3 +151,4 @@
 {"canonical_name": "qwen/qwen3.5-flash-02-23", "providers": [{"provider_name": "openrouter", "provider_model_id": "qwen/qwen3.5-flash-02-23", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "google/gemini-3.1-flash-lite-preview", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemini-3.1-flash-lite-preview", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "openai/gpt-5.3-chat", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.3-chat", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "openai/gpt-5.4", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.4", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
