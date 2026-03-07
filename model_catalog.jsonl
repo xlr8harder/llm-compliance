@@ -86,7 +86,7 @@
 {"canonical_name": "openrouter/polaris-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/polaris-alpha", "priority": 0}]}
 {"canonical_name": "moonshotai/kimi-k2-thinking", "providers": [{"provider_name": "openrouter", "provider_model_id": "moonshotai/kimi-k2-thinking", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "amazon/nova-premier-v1", "providers": [{"provider_name": "openrouter", "provider_model_id": "amazon/nova-premier-v1", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
-{"canonical_name": "openai/gpt-5.1-2025-11-13", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.1", "priority": 0}]}
+{"canonical_name": "openai/gpt-5.1-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.1", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "openai/gpt-5.1-chat-2025-11-13", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.1-chat", "priority": 0}]}
 {"canonical_name": "openrouter/sherlock-dash-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/sherlock-dash-alpha", "priority": 0}]}
 {"canonical_name": "openrouter/sherlock-think-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/sherlock-think-alpha", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
@@ -116,7 +116,7 @@
 {"canonical_name": "z-ai/glm-4.6v", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-4.6v", "priority": 0}]}
 {"canonical_name": "essentialai/rnj-1-instruct", "providers": [{"provider_name": "openrouter", "provider_model_id": "essentialai/rnj-1-instruct", "priority": 0}]}
 {"canonical_name": "openai/gpt-5.2-chat", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.2-chat", "priority": 0}]}
-{"canonical_name": "openai/gpt-5.2", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.2", "priority": 0}]}
+{"canonical_name": "openai/gpt-5.2-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.2", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "nvidia/nemotron-3-nano-30b-a3b:free", "providers": [{"provider_name": "openrouter", "provider_model_id": "nvidia/nemotron-3-nano-30b-a3b:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "nvidia/nemotron-3-nano-30b-a3b", "providers": [{"provider_name": "openrouter", "provider_model_id": "nvidia/nemotron-3-nano-30b-a3b:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "mistralai/mistral-small-creative", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/mistral-small-creative", "priority": 0}]}
@@ -154,3 +154,6 @@
 {"canonical_name": "openai/gpt-5.4", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.4", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "x-ai/grok-4.20-experimental-beta-0304-non-reasoning", "providers": [{"provider_name": "xai", "provider_model_id": "grok-4.20-experimental-beta-0304-non-reasoning", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "x-ai/grok-4.20-experimental-beta-0304-reasoning", "providers": [{"provider_name": "xai", "provider_model_id": "grok-4.20-experimental-beta-0304-reasoning", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "openai/gpt-5.4-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.4", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "openai/gpt-5.1", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.1", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "openai/gpt-5.2", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.2", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}

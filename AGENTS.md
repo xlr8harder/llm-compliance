@@ -30,6 +30,32 @@ as close to zero as practical, judging compliance, and publishing to Speechmap.
     `ask.py` then treats missing reasoning as an error, which helps catch
     misconfigured OpenRouter subproviders.
 
+## Reasoning mode policy
+- Goal: for models that support both operational modes, maintain a pair:
+  - base mode: `<model>` (non-reasoning)
+  - reasoning mode: `<model>-reasoning`
+- Do a cheap mode probe before full runs when behavior is unclear.
+  - Probe A (default behavior): no reasoning flags.
+  - Probe B (reasoning enabled): `--reasoning` with no effort override.
+  - Probe C (only if needed): `--reasoning --reasoning-effort medium`.
+- Prefer provider/model defaults when possible.
+  - If reasoning can be enabled without explicit effort, use that default for
+    `<model>-reasoning`.
+  - Use explicit `--reasoning-effort medium` only when required for reliable
+    reasoning behavior or when defaults are inconsistent.
+- How to verify probe outcomes:
+  - Check response payload for `usage.completion_tokens_details.reasoning_tokens`
+    and/or `message.reasoning` / `message.reasoning_details`.
+  - If `--reasoning` is enabled and no reasoning appears across probes, treat as
+    likely unsupported/misconfigured and do not label as reasoning mode.
+- If the provider exposes only one mode (cannot reliably toggle):
+  - Run only the supported mode, keep canonical naming explicit and accurate, and
+    add a note in Speechmap metadata when useful.
+- Keep naming synchronized everywhere after any rename:
+  - response filename, analysis filename, JSONL `model` field values,
+    `model_catalog.jsonl`, and `../speechmap/model_metadata.json`.
+  - For tracked files, use `git mv` (not plain `mv`) to preserve rename history.
+
 ## Run a new model (responses)
 1) Run the model:
 ```bash
