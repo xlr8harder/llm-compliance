@@ -157,3 +157,8 @@
 {"canonical_name": "openai/gpt-5.2", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5.2", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "openai/gpt-5-probe-no-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "openai/gpt-5-probe-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "openai/gpt-5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "nvidia/nemotron-3-super-120b-a12b-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "nvidia/nemotron-3-super-120b-a12b:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "openrouter/healer-alpha-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/healer-alpha", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "openrouter/hunter-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/hunter-alpha", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "openrouter/healer-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/healer-alpha", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "nvidia/nemotron-3-super-120b-a12b", "providers": [{"provider_name": "openrouter", "provider_model_id": "nvidia/nemotron-3-super-120b-a12b:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
