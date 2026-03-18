@@ -49,8 +49,11 @@ as close to zero as practical, judging compliance, and publishing to Speechmap.
   - If `--reasoning` is enabled and no reasoning appears across probes, treat as
     likely unsupported/misconfigured and do not label as reasoning mode.
 - If the provider exposes only one mode (cannot reliably toggle):
-  - Run only the supported mode, keep canonical naming explicit and accurate, and
-    add a note in Speechmap metadata when useful.
+  - Run only the supported mode.
+  - Keep the canonical/public model name as the base identifier `<model>`.
+  - Do not append `-reasoning` or other mode suffixes when there is no
+    corresponding alternate mode to distinguish it from.
+  - Add a note in Speechmap metadata when useful.
 - Keep naming synchronized everywhere after any rename:
   - response filename, analysis filename, JSONL `model` field values,
     `model_catalog.jsonl`, and `../speechmap/model_metadata.json`.

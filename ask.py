@@ -174,6 +174,8 @@ def clean_frpe(responses_path: Path) -> List[ModelResponse]:
     kept_rows: List[ModelResponse] = []
     removed_empty = 0
     removed_error = 0
+    removed_duplicate = 0
+    seen_question_ids: set[str] = set()
 
     for row in existing_rows:
         if _is_empty_response(row):
@@ -182,15 +184,20 @@ def clean_frpe(responses_path: Path) -> List[ModelResponse]:
         if not row.is_success():
             removed_error += 1
             continue
+        if row.question_id in seen_question_ids:
+            removed_duplicate += 1
+            continue
+        seen_question_ids.add(row.question_id)
         kept_rows.append(row)
 
-    removed_total = removed_empty + removed_error
+    removed_total = removed_empty + removed_error + removed_duplicate
     if removed_total:
         LOGGER.info(
-            "FRPE: removed %d rows (errors=%d, empty_response=%d)",
+            "FRPE: removed %d rows (errors=%d, empty_response=%d, duplicate_question_id=%d)",
             removed_total,
             removed_error,
             removed_empty,
+            removed_duplicate,
         )
     JSONLHandler.save_jsonl(kept_rows, responses_path, append=False)
     return kept_rows
