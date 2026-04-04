@@ -22,10 +22,10 @@ as close to zero as practical, judging compliance, and publishing to Speechmap.
 - If not provided, ask:
   - Whether to use `--reasoning` or `--no-reasoning`.
   - The canonical model name (use the API name unless a more specific label is needed).
-  - If unsure, probe by running a small test or by checking whether reasoning
-    traces appear in the response when `--reasoning` is requested.
-    - Quick probe (prints `reasoning` if provided):
-      `uv run mq test --provider openrouter speechmap-test <model_id> --json "test query"`
+  - If unsure, probe with the standardized tool before the full run:
+    - `uv run python tools/probe_reasoning.py --provider openrouter --model <model_id>`
+    - This runs Probe A/B automatically and Probe C only when needed, then
+      recommends canonical naming plus the run flags to use.
   - Default policy: if reasoning traces are returned in a probe, use `--reasoning`.
     `ask.py` then treats missing reasoning as an error, which helps catch
     misconfigured OpenRouter subproviders.
@@ -35,6 +35,8 @@ as close to zero as practical, judging compliance, and publishing to Speechmap.
   - base mode: `<model>` (non-reasoning)
   - reasoning mode: `<model>-reasoning`
 - Do a cheap mode probe before full runs when behavior is unclear.
+  - Standard command:
+    `uv run python tools/probe_reasoning.py --provider openrouter --model <model_id>`
   - Probe A (default behavior): no reasoning flags.
   - Probe B (reasoning enabled): `--reasoning` with no effort override.
   - Probe C (only if needed): `--reasoning --reasoning-effort medium`.

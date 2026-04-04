@@ -192,3 +192,5 @@
 {"canonical_name": "z-ai/glm-5v-turbo", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-5v-turbo", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "google/gemma-4-31b-it-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemma-4-31b-it", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "google/gemma-4-31b-it", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemma-4-31b-it", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "google/gemma-4-26b-a4b-it", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemma-4-26b-a4b-it", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "google/gemma-4-26b-a4b-it-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "google/gemma-4-26b-a4b-it", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}

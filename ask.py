@@ -44,12 +44,12 @@ except ImportError:  # pragma: no cover - non-Unix platforms
 # ---------------------------------------------------------------------------
 from compliance.data import JSONLHandler, ModelResponse, Question
 from compliance.models import ModelCatalog
+from compliance.utils.llm_requests import request_model_response, resolve_catalog_entry
 
 # ---------------------------------------------------------------------------
 # llm_client layer
 # ---------------------------------------------------------------------------
 import llm_client
-from llm_client.retry import retry_request
 from llm_client.testing import run_coherency_tests
 
 LOGGER = logging.getLogger("ask")
@@ -245,25 +245,6 @@ def detect_metadata(responses_path: Path):
     raise RuntimeError(f"{responses_path} has no readable ModelResponse entries")
 
 
-def resolve_catalog_entry(
-    catalog: ModelCatalog,
-    canonical_name: Optional[str],
-    provider: str,
-    api_model: str,
-):
-    canonical, provider_resolved, api_model_resolved = catalog.resolve_model(
-        canonical_name=canonical_name,
-        provider=provider,
-        provider_model_id=api_model,
-    )
-    if not provider_resolved or not api_model_resolved:
-        raise RuntimeError("Cannot resolve provider / model – please provide explicit flags")
-    return canonical or canonical_name, provider_resolved, api_model_resolved
-
-###############################################################################
-# Worker function
-###############################################################################
-
 def ask_worker(
     question: Question,
     provider_name: str,
@@ -277,33 +258,17 @@ def ask_worker(
     if limiter:
         limiter.acquire()
 
-    provider = llm_client.get_provider(provider_name)
-
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": question.question})
-
-    kwargs: Dict[str, Any] = {}
-    if overrides:
-        kwargs.update(overrides)
-    kwargs.setdefault("timeout", 180)
-
-    if provider_name == "openrouter":
-        if force_subprovider:
-            kwargs["only"] = [force_subprovider]
-        elif ignore_list:
-            kwargs["ignore_list"] = list(ignore_list)
-
-    response = retry_request(
-        provider=provider,
-        messages=messages,
-        model_id=api_model,
-        max_retries=4,
+    return request_model_response(
+        provider_name=provider_name,
+        api_model=api_model,
+        prompt=question.question,
+        ignore_list=ignore_list,
+        overrides=overrides,
+        system_prompt=system_prompt,
+        force_subprovider=force_subprovider,
+        timeout=180,
         context={"qid": question.id},
-        **kwargs,
     )
-    return response
 
 ###############################################################################
 # CLI parsing
@@ -497,11 +462,16 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
 
     system_prompt_info = f"system_prompt={len(args.system_prompt)} chars" if args.system_prompt else "system_prompt=none"
     
-    # Prepare request_overrides for this run. If neither --reasoning nor --no-reasoning
-    # was specified, omit the reasoning block entirely from the API request to avoid
-    # confusing models that don't support it.
+    # Prepare request_overrides for this run.
+    #
+    # In normal mode, if neither --reasoning nor --no-reasoning was specified,
+    # omit the reasoning block entirely from the API request to avoid confusing
+    # models that don't support it.
+    #
+    # In detect mode, preserve the catalog/default reasoning override so retries
+    # resume the same operational mode as the original run.
     request_overrides: Dict[str, Any] = dict(overrides) if overrides else {}
-    if not args.reasoning and not getattr(args, "no_reasoning", False):
+    if not args.detect and not args.reasoning and not getattr(args, "no_reasoning", False):
         request_overrides.pop("reasoning", None)
     if args.max_tokens is not None:
         request_overrides["max_tokens"] = args.max_tokens
