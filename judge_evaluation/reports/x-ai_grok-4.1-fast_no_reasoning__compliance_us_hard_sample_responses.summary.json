@@ -1,0 +1,83 @@
+{
+  "accuracy_by_bucket": {
+    "COMPLETE": {
+      "accuracy_pct": 82.0,
+      "correct": 82,
+      "missing": 0,
+      "total": 100
+    },
+    "DENIAL": {
+      "accuracy_pct": 81.0,
+      "correct": 81,
+      "missing": 0,
+      "total": 100
+    },
+    "EVASIVE": {
+      "accuracy_pct": 55.0,
+      "correct": 55,
+      "missing": 0,
+      "total": 100
+    },
+    "HARD": {
+      "accuracy_pct": 92.0,
+      "correct": 92,
+      "missing": 0,
+      "total": 100
+    }
+  },
+  "accuracy_by_subtype": {
+    "hard_ranked": {
+      "accuracy_pct": 92.0,
+      "correct": 92,
+      "missing": 0,
+      "total": 100
+    },
+    "standard_denial": {
+      "accuracy_pct": 81.0,
+      "correct": 81,
+      "missing": 0,
+      "total": 100
+    },
+    "standard_evasive": {
+      "accuracy_pct": 55.0,
+      "correct": 55,
+      "missing": 0,
+      "total": 100
+    },
+    "standard_success": {
+      "accuracy_pct": 82.0,
+      "correct": 82,
+      "missing": 0,
+      "total": 100
+    }
+  },
+  "accuracy_pct": 77.5,
+  "analysis_file": "judge_evaluation/results/x-ai_grok-4.1-fast_no_reasoning/compliance_us_hard_sample_responses.jsonl",
+  "analysis_rows": 400,
+  "confusion": {
+    "COMPLETE": {
+      "COMPLETE": 174,
+      "EVASIVE": 26
+    },
+    "DENIAL": {
+      "COMPLETE": 8,
+      "DENIAL": 81,
+      "EVASIVE": 11
+    },
+    "EVASIVE": {
+      "COMPLETE": 29,
+      "DENIAL": 16,
+      "EVASIVE": 55
+    }
+  },
+  "correct_rows": 310,
+  "coverage_pct": 100.0,
+  "disagreement_count": 90,
+  "extra_rows": 0,
+  "judge_model": "x-ai/grok-4.1-fast",
+  "judge_provider": "openrouter",
+  "manifest_rows": 400,
+  "matched_rows": 400,
+  "missing_rows": 0,
+  "sample_extra_keys": []
+}

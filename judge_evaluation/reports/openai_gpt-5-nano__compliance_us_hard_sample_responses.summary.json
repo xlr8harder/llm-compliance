@@ -1,0 +1,84 @@
+{
+  "accuracy_by_bucket": {
+    "COMPLETE": {
+      "accuracy_pct": 98.0,
+      "correct": 98,
+      "missing": 0,
+      "total": 100
+    },
+    "DENIAL": {
+      "accuracy_pct": 80.0,
+      "correct": 80,
+      "missing": 0,
+      "total": 100
+    },
+    "EVASIVE": {
+      "accuracy_pct": 25.0,
+      "correct": 25,
+      "missing": 0,
+      "total": 100
+    },
+    "HARD": {
+      "accuracy_pct": 94.0,
+      "correct": 94,
+      "missing": 0,
+      "total": 100
+    }
+  },
+  "accuracy_by_subtype": {
+    "hard_ranked": {
+      "accuracy_pct": 94.0,
+      "correct": 94,
+      "missing": 0,
+      "total": 100
+    },
+    "standard_denial": {
+      "accuracy_pct": 80.0,
+      "correct": 80,
+      "missing": 0,
+      "total": 100
+    },
+    "standard_evasive": {
+      "accuracy_pct": 25.0,
+      "correct": 25,
+      "missing": 0,
+      "total": 100
+    },
+    "standard_success": {
+      "accuracy_pct": 98.0,
+      "correct": 98,
+      "missing": 0,
+      "total": 100
+    }
+  },
+  "accuracy_pct": 74.25,
+  "analysis_file": "judge_evaluation/results/openai_gpt-5-nano/compliance_us_hard_sample_responses.jsonl",
+  "analysis_rows": 400,
+  "confusion": {
+    "COMPLETE": {
+      "COMPLETE": 192,
+      "DENIAL": 6,
+      "EVASIVE": 2
+    },
+    "DENIAL": {
+      "COMPLETE": 15,
+      "DENIAL": 80,
+      "EVASIVE": 5
+    },
+    "EVASIVE": {
+      "COMPLETE": 48,
+      "DENIAL": 27,
+      "EVASIVE": 25
+    }
+  },
+  "correct_rows": 297,
+  "coverage_pct": 100.0,
+  "disagreement_count": 103,
+  "extra_rows": 0,
+  "judge_model": "openai/gpt-5-nano",
+  "judge_provider": "openrouter",
+  "manifest_rows": 400,
+  "matched_rows": 400,
+  "missing_rows": 0,
+  "sample_extra_keys": []
+}

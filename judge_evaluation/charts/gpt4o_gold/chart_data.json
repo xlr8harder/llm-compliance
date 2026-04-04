@@ -1,0 +1,1047 @@
+{
+  "aggregate_score_shift": [
+    {
+      "COMPLETE_pp_delta": 5.25,
+      "DENIAL_pp_delta": 0.25,
+      "EVASIVE_pp_delta": -5.5,
+      "key": "openai_gpt-5.4_no_reasoning",
+      "name": "GPT-5.4\nno reasoning",
+      "total_abs_pp_delta": 11.0
+    },
+    {
+      "COMPLETE_pp_delta": 8.0,
+      "DENIAL_pp_delta": -0.5,
+      "EVASIVE_pp_delta": -7.5,
+      "key": "openai_gpt-5.4_reasoning_medium",
+      "name": "GPT-5.4\nreasoning",
+      "total_abs_pp_delta": 16.0
+    },
+    {
+      "COMPLETE_pp_delta": 3.75,
+      "DENIAL_pp_delta": -3.5,
+      "EVASIVE_pp_delta": -0.25,
+      "key": "x-ai_grok-4.1-fast_reasoning_medium",
+      "name": "Grok-4.1-Fast\nreasoning",
+      "total_abs_pp_delta": 7.5
+    },
+    {
+      "COMPLETE_pp_delta": 14.0,
+      "DENIAL_pp_delta": 0.75,
+      "EVASIVE_pp_delta": -15.0,
+      "key": "openai_gpt-5-mini",
+      "name": "GPT-5-mini\n(reasoning)",
+      "total_abs_pp_delta": 29.75
+    },
+    {
+      "COMPLETE_pp_delta": 2.75,
+      "DENIAL_pp_delta": -0.75,
+      "EVASIVE_pp_delta": -2.0,
+      "key": "x-ai_grok-4.1-fast_no_reasoning",
+      "name": "Grok-4.1-Fast\nno reasoning",
+      "total_abs_pp_delta": 5.5
+    },
+    {
+      "COMPLETE_pp_delta": 13.25,
+      "DENIAL_pp_delta": 0.5,
+      "EVASIVE_pp_delta": -13.75,
+      "key": "openai_gpt-5.4-mini_reasoning",
+      "name": "GPT-5.4-mini\nreasoning",
+      "total_abs_pp_delta": 27.5
+    },
+    {
+      "COMPLETE_pp_delta": 8.25,
+      "DENIAL_pp_delta": 0.5,
+      "EVASIVE_pp_delta": -8.75,
+      "key": "openai_gpt-5.4-nano_no_reasoning",
+      "name": "GPT-5.4-nano\nno reasoning",
+      "total_abs_pp_delta": 17.5
+    },
+    {
+      "COMPLETE_pp_delta": 5.75,
+      "DENIAL_pp_delta": 0.25,
+      "EVASIVE_pp_delta": -6.0,
+      "key": "openai_gpt-5.4-mini_no_reasoning",
+      "name": "GPT-5.4-mini\nno reasoning",
+      "total_abs_pp_delta": 12.0
+    },
+    {
+      "COMPLETE_pp_delta": 11.0,
+      "DENIAL_pp_delta": 0.5,
+      "EVASIVE_pp_delta": -11.5,
+      "key": "openai_gpt-5.4-nano_reasoning",
+      "name": "GPT-5.4-nano\nreasoning",
+      "total_abs_pp_delta": 23.0
+    },
+    {
+      "COMPLETE_pp_delta": 13.75,
+      "DENIAL_pp_delta": 3.25,
+      "EVASIVE_pp_delta": -17.0,
+      "key": "openai_gpt-5-nano",
+      "name": "GPT-5-nano\n(reasoning)",
+      "total_abs_pp_delta": 34.0
+    },
+    {
+      "COMPLETE_pp_delta": -2.5,
+      "DENIAL_pp_delta": 11.75,
+      "EVASIVE_pp_delta": -9.5,
+      "key": "qwen_qwen3.5-9b_together_no_reasoning",
+      "name": "Qwen3.5-9B\nTogether no reasoning",
+      "total_abs_pp_delta": 23.75
+    }
+  ],
+  "baseline_expected_label_counts": {
+    "COMPLETE": 200,
+    "DENIAL": 100,
+    "EVASIVE": 100
+  },
+  "gold_revision": {
+    "original_counts": {
+      "COMPLETE": 200,
+      "DENIAL": 100,
+      "EVASIVE": 100
+    },
+    "revised_counts": {
+      "COMPLETE": 219,
+      "DENIAL": 96,
+      "EVASIVE": 85
+    },
+    "status_by_bucket": {
+      "COMPLETE:gold_plausible": 3,
+      "COMPLETE:likely_gold_wrong": 4,
+      "DENIAL:likely_gold_wrong": 17,
+      "EVASIVE:ambiguous": 1,
+      "EVASIVE:gold_plausible": 2,
+      "EVASIVE:likely_gold_wrong": 31,
+      "HARD:gold_plausible": 1,
+      "HARD:likely_gold_wrong": 1
+    },
+    "status_counts": {
+      "ambiguous": 1,
+      "gold_plausible": 6,
+      "likely_gold_wrong": 53
+    },
+    "transition_counts": {
+      "COMPLETE->COMPLETE": 195,
+      "COMPLETE->EVASIVE": 5,
+      "DENIAL->COMPLETE": 6,
+      "DENIAL->DENIAL": 83,
+      "DENIAL->EVASIVE": 11,
+      "EVASIVE->COMPLETE": 18,
+      "EVASIVE->DENIAL": 13,
+      "EVASIVE->EVASIVE": 69
+    }
+  },
+  "judge_accuracy_original_vs_revised_gold": [
+    {
+      "key": "original_gpt4o_gold",
+      "name": "Original GPT-4o\ngold",
+      "original_accuracy_pct": 100.0,
+      "revised_accuracy_pct": 86.75
+    },
+    {
+      "key": "openai_gpt-5.4_no_reasoning",
+      "name": "GPT-5.4\nno reasoning",
+      "original_accuracy_pct": 79.75,
+      "revised_accuracy_pct": 93.0
+    },
+    {
+      "key": "openai_gpt-5.4_reasoning_medium",
+      "name": "GPT-5.4\nreasoning",
+      "original_accuracy_pct": 79.25,
+      "revised_accuracy_pct": 91.5
+    },
+    {
+      "key": "x-ai_grok-4.1-fast_reasoning_medium",
+      "name": "Grok-4.1-Fast\nreasoning",
+      "original_accuracy_pct": 78.25,
+      "revised_accuracy_pct": 89.5
+    },
+    {
+      "key": "openai_gpt-5-mini",
+      "name": "GPT-5-mini\n(reasoning)",
+      "original_accuracy_pct": 78.0,
+      "revised_accuracy_pct": 86.75
+    },
+    {
+      "key": "x-ai_grok-4.1-fast_no_reasoning",
+      "name": "Grok-4.1-Fast\nno reasoning",
+      "original_accuracy_pct": 77.5,
+      "revised_accuracy_pct": 88.0
+    },
+    {
+      "key": "openai_gpt-5.4-mini_reasoning",
+      "name": "GPT-5.4-mini\nreasoning",
+      "original_accuracy_pct": 77.0,
+      "revised_accuracy_pct": 86.25
+    },
+    {
+      "key": "openai_gpt-5.4-nano_no_reasoning",
+      "name": "GPT-5.4-nano\nno reasoning",
+      "original_accuracy_pct": 76.75,
+      "revised_accuracy_pct": 85.25
+    },
+    {
+      "key": "openai_gpt-5.4-mini_no_reasoning",
+      "name": "GPT-5.4-mini\nno reasoning",
+      "original_accuracy_pct": 76.5,
+      "revised_accuracy_pct": 85.75
+    },
+    {
+      "key": "openai_gpt-5.4-nano_reasoning",
+      "name": "GPT-5.4-nano\nreasoning",
+      "original_accuracy_pct": 76.5,
+      "revised_accuracy_pct": 85.75
+    },
+    {
+      "key": "openai_gpt-5-nano",
+      "name": "GPT-5-nano\n(reasoning)",
+      "original_accuracy_pct": 74.25,
+      "revised_accuracy_pct": 82.25
+    },
+    {
+      "key": "qwen_qwen3.5-9b_together_no_reasoning",
+      "name": "Qwen3.5-9B\nTogether no reasoning",
+      "original_accuracy_pct": 68.75,
+      "revised_accuracy_pct": 74.0
+    }
+  ],
+  "judges": [
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": 90.0,
+        "DENIAL": 80.0,
+        "EVASIVE": 52.0,
+        "HARD": 97.0
+      },
+      "accuracy_pct": 79.75,
+      "key": "openai_gpt-5.4_no_reasoning",
+      "name": "GPT-5.4 no reasoning",
+      "predicted_counts": {
+        "COMPLETE": 221,
+        "DENIAL": 101,
+        "EVASIVE": 78
+      },
+      "transition_counts": {
+        "COMPLETE->EVASIVE": 13,
+        "DENIAL->COMPLETE": 7,
+        "DENIAL->EVASIVE": 13,
+        "EVASIVE->COMPLETE": 27,
+        "EVASIVE->DENIAL": 21
+      }
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": 90.0,
+        "DENIAL": 81.0,
+        "EVASIVE": 47.0,
+        "HARD": 99.0
+      },
+      "accuracy_pct": 79.25,
+      "key": "openai_gpt-5.4_reasoning_medium",
+      "name": "GPT-5.4 reasoning",
+      "predicted_counts": {
+        "COMPLETE": 232,
+        "DENIAL": 98,
+        "EVASIVE": 70
+      },
+      "transition_counts": {
+        "COMPLETE->EVASIVE": 11,
+        "DENIAL->COMPLETE": 7,
+        "DENIAL->EVASIVE": 12,
+        "EVASIVE->COMPLETE": 36,
+        "EVASIVE->DENIAL": 17
+      }
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": 86.0,
+        "DENIAL": 73.0,
+        "EVASIVE": 60.0,
+        "HARD": 94.0
+      },
+      "accuracy_pct": 78.25,
+      "key": "x-ai_grok-4.1-fast_reasoning_medium",
+      "name": "Grok-4.1-Fast reasoning",
+      "predicted_counts": {
+        "COMPLETE": 215,
+        "DENIAL": 86,
+        "EVASIVE": 99
+      },
+      "transition_counts": {
+        "COMPLETE->EVASIVE": 20,
+        "DENIAL->COMPLETE": 8,
+        "DENIAL->EVASIVE": 19,
+        "EVASIVE->COMPLETE": 27,
+        "EVASIVE->DENIAL": 13
+      }
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": 99.0,
+        "DENIAL": 81.0,
+        "EVASIVE": 33.0,
+        "HARD": 99.0
+      },
+      "accuracy_pct": 78.0,
+      "key": "openai_gpt-5-mini",
+      "name": "GPT-5-mini (reasoning)",
+      "predicted_counts": {
+        "COMPLETE": 256,
+        "DENIAL": 103,
+        "ERROR_JUDGE_FORMAT": 1,
+        "EVASIVE": 40
+      },
+      "transition_counts": {
+        "COMPLETE->EVASIVE": 1,
+        "DENIAL->COMPLETE": 13,
+        "DENIAL->EVASIVE": 6,
+        "EVASIVE->COMPLETE": 45,
+        "EVASIVE->DENIAL": 22,
+        "OTHER": 1
+      }
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": 82.0,
+        "DENIAL": 81.0,
+        "EVASIVE": 55.0,
+        "HARD": 92.0
+      },
+      "accuracy_pct": 77.5,
+      "key": "x-ai_grok-4.1-fast_no_reasoning",
+      "name": "Grok-4.1-Fast no reasoning",
+      "predicted_counts": {
+        "COMPLETE": 211,
+        "DENIAL": 97,
+        "EVASIVE": 92
+      },
+      "transition_counts": {
+        "COMPLETE->EVASIVE": 26,
+        "DENIAL->COMPLETE": 8,
+        "DENIAL->EVASIVE": 11,
+        "EVASIVE->COMPLETE": 29,
+        "EVASIVE->DENIAL": 16
+      }
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": 95.0,
+        "DENIAL": 80.0,
+        "EVASIVE": 34.0,
+        "HARD": 99.0
+      },
+      "accuracy_pct": 77.0,
+      "key": "openai_gpt-5.4-mini_reasoning",
+      "name": "GPT-5.4-mini reasoning",
+      "predicted_counts": {
+        "COMPLETE": 253,
+        "DENIAL": 102,
+        "EVASIVE": 45
+      },
+      "transition_counts": {
+        "COMPLETE->EVASIVE": 6,
+        "DENIAL->COMPLETE": 15,
+        "DENIAL->EVASIVE": 5,
+        "EVASIVE->COMPLETE": 44,
+        "EVASIVE->DENIAL": 22
+      }
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": 87.0,
+        "DENIAL": 81.0,
+        "EVASIVE": 42.0,
+        "HARD": 97.0
+      },
+      "accuracy_pct": 76.75,
+      "key": "openai_gpt-5.4-nano_no_reasoning",
+      "name": "GPT-5.4-nano no reasoning",
+      "predicted_counts": {
+        "COMPLETE": 233,
+        "DENIAL": 102,
+        "EVASIVE": 65
+      },
+      "transition_counts": {
+        "COMPLETE->DENIAL": 1,
+        "COMPLETE->EVASIVE": 15,
+        "DENIAL->COMPLETE": 11,
+        "DENIAL->EVASIVE": 8,
+        "EVASIVE->COMPLETE": 38,
+        "EVASIVE->DENIAL": 20
+      }
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": 89.0,
+        "DENIAL": 79.0,
+        "EVASIVE": 47.0,
+        "HARD": 91.0
+      },
+      "accuracy_pct": 76.5,
+      "key": "openai_gpt-5.4-mini_no_reasoning",
+      "name": "GPT-5.4-mini no reasoning",
+      "predicted_counts": {
+        "COMPLETE": 223,
+        "DENIAL": 101,
+        "EVASIVE": 76
+      },
+      "transition_counts": {
+        "COMPLETE->DENIAL": 1,
+        "COMPLETE->EVASIVE": 19,
+        "DENIAL->COMPLETE": 11,
+        "DENIAL->EVASIVE": 10,
+        "EVASIVE->COMPLETE": 32,
+        "EVASIVE->DENIAL": 21
+      }
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": 89.0,
+        "DENIAL": 81.0,
+        "EVASIVE": 38.0,
+        "HARD": 98.0
+      },
+      "accuracy_pct": 76.5,
+      "key": "openai_gpt-5.4-nano_reasoning",
+      "name": "GPT-5.4-nano reasoning",
+      "predicted_counts": {
+        "COMPLETE": 244,
+        "DENIAL": 102,
+        "EVASIVE": 54
+      },
+      "transition_counts": {
+        "COMPLETE->DENIAL": 1,
+        "COMPLETE->EVASIVE": 12,
+        "DENIAL->COMPLETE": 15,
+        "DENIAL->EVASIVE": 4,
+        "EVASIVE->COMPLETE": 42,
+        "EVASIVE->DENIAL": 20
+      }
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": 98.0,
+        "DENIAL": 80.0,
+        "EVASIVE": 25.0,
+        "HARD": 94.0
+      },
+      "accuracy_pct": 74.25,
+      "key": "openai_gpt-5-nano",
+      "name": "GPT-5-nano (reasoning)",
+      "predicted_counts": {
+        "COMPLETE": 255,
+        "DENIAL": 113,
+        "EVASIVE": 32
+      },
+      "transition_counts": {
+        "COMPLETE->DENIAL": 6,
+        "COMPLETE->EVASIVE": 2,
+        "DENIAL->COMPLETE": 15,
+        "DENIAL->EVASIVE": 5,
+        "EVASIVE->COMPLETE": 48,
+        "EVASIVE->DENIAL": 27
+      }
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": 70.0,
+        "DENIAL": 83.0,
+        "EVASIVE": 35.0,
+        "HARD": 87.0
+      },
+      "accuracy_pct": 68.75,
+      "key": "qwen_qwen3.5-9b_together_no_reasoning",
+      "name": "Qwen3.5-9B Together no reasoning",
+      "predicted_counts": {
+        "COMPLETE": 190,
+        "DENIAL": 147,
+        "ERROR_JUDGE_FORMAT": 1,
+        "EVASIVE": 62
+      },
+      "transition_counts": {
+        "COMPLETE->DENIAL": 21,
+        "COMPLETE->EVASIVE": 21,
+        "DENIAL->COMPLETE": 11,
+        "DENIAL->EVASIVE": 6,
+        "EVASIVE->COMPLETE": 22,
+        "EVASIVE->DENIAL": 43,
+        "OTHER": 1
+      }
+    }
+  ],
+  "label_divergence": [
+    {
+      "COMPLETE_abs_improvement": 19,
+      "COMPLETE_signed_original": 21,
+      "COMPLETE_signed_revised": 2,
+      "DENIAL_abs_improvement": -4,
+      "DENIAL_signed_original": 1,
+      "DENIAL_signed_revised": 5,
+      "EVASIVE_abs_improvement": 15,
+      "EVASIVE_signed_original": -22,
+      "EVASIVE_signed_revised": -7,
+      "key": "openai_gpt-5.4_no_reasoning",
+      "name": "GPT-5.4\nno reasoning"
+    },
+    {
+      "COMPLETE_abs_improvement": 19,
+      "COMPLETE_signed_original": 32,
+      "COMPLETE_signed_revised": 13,
+      "DENIAL_abs_improvement": 0,
+      "DENIAL_signed_original": -2,
+      "DENIAL_signed_revised": 2,
+      "EVASIVE_abs_improvement": 15,
+      "EVASIVE_signed_original": -30,
+      "EVASIVE_signed_revised": -15,
+      "key": "openai_gpt-5.4_reasoning_medium",
+      "name": "GPT-5.4\nreasoning"
+    },
+    {
+      "COMPLETE_abs_improvement": 11,
+      "COMPLETE_signed_original": 15,
+      "COMPLETE_signed_revised": -4,
+      "DENIAL_abs_improvement": 4,
+      "DENIAL_signed_original": -14,
+      "DENIAL_signed_revised": -10,
+      "EVASIVE_abs_improvement": -13,
+      "EVASIVE_signed_original": -1,
+      "EVASIVE_signed_revised": 14,
+      "key": "x-ai_grok-4.1-fast_reasoning_medium",
+      "name": "Grok-4.1-Fast\nreasoning"
+    },
+    {
+      "COMPLETE_abs_improvement": 19,
+      "COMPLETE_signed_original": 56,
+      "COMPLETE_signed_revised": 37,
+      "DENIAL_abs_improvement": -4,
+      "DENIAL_signed_original": 3,
+      "DENIAL_signed_revised": 7,
+      "EVASIVE_abs_improvement": 15,
+      "EVASIVE_signed_original": -60,
+      "EVASIVE_signed_revised": -45,
+      "key": "openai_gpt-5-mini",
+      "name": "GPT-5-mini\n(reasoning)"
+    },
+    {
+      "COMPLETE_abs_improvement": 3,
+      "COMPLETE_signed_original": 11,
+      "COMPLETE_signed_revised": -8,
+      "DENIAL_abs_improvement": 2,
+      "DENIAL_signed_original": -3,
+      "DENIAL_signed_revised": 1,
+      "EVASIVE_abs_improvement": 1,
+      "EVASIVE_signed_original": -8,
+      "EVASIVE_signed_revised": 7,
+      "key": "x-ai_grok-4.1-fast_no_reasoning",
+      "name": "Grok-4.1-Fast\nno reasoning"
+    },
+    {
+      "COMPLETE_abs_improvement": 19,
+      "COMPLETE_signed_original": 53,
+      "COMPLETE_signed_revised": 34,
+      "DENIAL_abs_improvement": -4,
+      "DENIAL_signed_original": 2,
+      "DENIAL_signed_revised": 6,
+      "EVASIVE_abs_improvement": 15,
+      "EVASIVE_signed_original": -55,
+      "EVASIVE_signed_revised": -40,
+      "key": "openai_gpt-5.4-mini_reasoning",
+      "name": "GPT-5.4-mini\nreasoning"
+    },
+    {
+      "COMPLETE_abs_improvement": 19,
+      "COMPLETE_signed_original": 33,
+      "COMPLETE_signed_revised": 14,
+      "DENIAL_abs_improvement": -4,
+      "DENIAL_signed_original": 2,
+      "DENIAL_signed_revised": 6,
+      "EVASIVE_abs_improvement": 15,
+      "EVASIVE_signed_original": -35,
+      "EVASIVE_signed_revised": -20,
+      "key": "openai_gpt-5.4-nano_no_reasoning",
+      "name": "GPT-5.4-nano\nno reasoning"
+    },
+    {
+      "COMPLETE_abs_improvement": 19,
+      "COMPLETE_signed_original": 23,
+      "COMPLETE_signed_revised": 4,
+      "DENIAL_abs_improvement": -4,
+      "DENIAL_signed_original": 1,
+      "DENIAL_signed_revised": 5,
+      "EVASIVE_abs_improvement": 15,
+      "EVASIVE_signed_original": -24,
+      "EVASIVE_signed_revised": -9,
+      "key": "openai_gpt-5.4-mini_no_reasoning",
+      "name": "GPT-5.4-mini\nno reasoning"
+    },
+    {
+      "COMPLETE_abs_improvement": 19,
+      "COMPLETE_signed_original": 44,
+      "COMPLETE_signed_revised": 25,
+      "DENIAL_abs_improvement": -4,
+      "DENIAL_signed_original": 2,
+      "DENIAL_signed_revised": 6,
+      "EVASIVE_abs_improvement": 15,
+      "EVASIVE_signed_original": -46,
+      "EVASIVE_signed_revised": -31,
+      "key": "openai_gpt-5.4-nano_reasoning",
+      "name": "GPT-5.4-nano\nreasoning"
+    },
+    {
+      "COMPLETE_abs_improvement": 19,
+      "COMPLETE_signed_original": 55,
+      "COMPLETE_signed_revised": 36,
+      "DENIAL_abs_improvement": -4,
+      "DENIAL_signed_original": 13,
+      "DENIAL_signed_revised": 17,
+      "EVASIVE_abs_improvement": 15,
+      "EVASIVE_signed_original": -68,
+      "EVASIVE_signed_revised": -53,
+      "key": "openai_gpt-5-nano",
+      "name": "GPT-5-nano\n(reasoning)"
+    },
+    {
+      "COMPLETE_abs_improvement": -19,
+      "COMPLETE_signed_original": -10,
+      "COMPLETE_signed_revised": -29,
+      "DENIAL_abs_improvement": -4,
+      "DENIAL_signed_original": 47,
+      "DENIAL_signed_revised": 51,
+      "EVASIVE_abs_improvement": 15,
+      "EVASIVE_signed_original": -38,
+      "EVASIVE_signed_revised": -23,
+      "key": "qwen_qwen3.5-9b_together_no_reasoning",
+      "name": "Qwen3.5-9B\nTogether no reasoning"
+    }
+  ],
+  "pairwise_agreement_pct": {
+    "GPT-5-mini (reasoning)": {
+      "GPT-5-mini (reasoning)": 100.0,
+      "GPT-5-nano (reasoning)": 91.75,
+      "GPT-5.4 no reasoning": 86.75,
+      "GPT-5.4 reasoning": 88.75,
+      "GPT-5.4-mini no reasoning": 85.25,
+      "GPT-5.4-mini reasoning": 89.75,
+      "GPT-5.4-nano no reasoning": 88.25,
+      "GPT-5.4-nano reasoning": 91.5,
+      "Grok-4.1-Fast no reasoning": 84.0,
+      "Grok-4.1-Fast reasoning": 82.25,
+      "Original GPT-4o gold (baseline)": 78.0,
+      "Qwen3.5-9B Together no reasoning": 75.5
+    },
+    "GPT-5-nano (reasoning)": {
+      "GPT-5-mini (reasoning)": 91.75,
+      "GPT-5-nano (reasoning)": 100.0,
+      "GPT-5.4 no reasoning": 83.5,
+      "GPT-5.4 reasoning": 85.5,
+      "GPT-5.4-mini no reasoning": 83.0,
+      "GPT-5.4-mini reasoning": 89.5,
+      "GPT-5.4-nano no reasoning": 85.5,
+      "GPT-5.4-nano reasoning": 89.25,
+      "Grok-4.1-Fast no reasoning": 80.25,
+      "Grok-4.1-Fast reasoning": 80.0,
+      "Original GPT-4o gold (baseline)": 74.25,
+      "Qwen3.5-9B Together no reasoning": 76.0
+    },
+    "GPT-5.4 no reasoning": {
+      "GPT-5-mini (reasoning)": 86.75,
+      "GPT-5-nano (reasoning)": 83.5,
+      "GPT-5.4 no reasoning": 100.0,
+      "GPT-5.4 reasoning": 92.25,
+      "GPT-5.4-mini no reasoning": 88.75,
+      "GPT-5.4-mini reasoning": 87.75,
+      "GPT-5.4-nano no reasoning": 87.0,
+      "GPT-5.4-nano reasoning": 88.0,
+      "Grok-4.1-Fast no reasoning": 86.75,
+      "Grok-4.1-Fast reasoning": 87.0,
+      "Original GPT-4o gold (baseline)": 79.75,
+      "Qwen3.5-9B Together no reasoning": 74.5
+    },
+    "GPT-5.4 reasoning": {
+      "GPT-5-mini (reasoning)": 88.75,
+      "GPT-5-nano (reasoning)": 85.5,
+      "GPT-5.4 no reasoning": 92.25,
+      "GPT-5.4 reasoning": 100.0,
+      "GPT-5.4-mini no reasoning": 86.75,
+      "GPT-5.4-mini reasoning": 89.0,
+      "GPT-5.4-nano no reasoning": 87.0,
+      "GPT-5.4-nano reasoning": 88.0,
+      "Grok-4.1-Fast no reasoning": 84.0,
+      "Grok-4.1-Fast reasoning": 85.75,
+      "Original GPT-4o gold (baseline)": 79.25,
+      "Qwen3.5-9B Together no reasoning": 73.75
+    },
+    "GPT-5.4-mini no reasoning": {
+      "GPT-5-mini (reasoning)": 85.25,
+      "GPT-5-nano (reasoning)": 83.0,
+      "GPT-5.4 no reasoning": 88.75,
+      "GPT-5.4 reasoning": 86.75,
+      "GPT-5.4-mini no reasoning": 100.0,
+      "GPT-5.4-mini reasoning": 88.25,
+      "GPT-5.4-nano no reasoning": 86.75,
+      "GPT-5.4-nano reasoning": 85.5,
+      "Grok-4.1-Fast no reasoning": 82.0,
+      "Grok-4.1-Fast reasoning": 80.25,
+      "Original GPT-4o gold (baseline)": 76.5,
+      "Qwen3.5-9B Together no reasoning": 72.75
+    },
+    "GPT-5.4-mini reasoning": {
+      "GPT-5-mini (reasoning)": 89.75,
+      "GPT-5-nano (reasoning)": 89.5,
+      "GPT-5.4 no reasoning": 87.75,
+      "GPT-5.4 reasoning": 89.0,
+      "GPT-5.4-mini no reasoning": 88.25,
+      "GPT-5.4-mini reasoning": 100.0,
+      "GPT-5.4-nano no reasoning": 86.5,
+      "GPT-5.4-nano reasoning": 87.75,
+      "Grok-4.1-Fast no reasoning": 84.5,
+      "Grok-4.1-Fast reasoning": 82.0,
+      "Original GPT-4o gold (baseline)": 77.0,
+      "Qwen3.5-9B Together no reasoning": 74.5
+    },
+    "GPT-5.4-nano no reasoning": {
+      "GPT-5-mini (reasoning)": 88.25,
+      "GPT-5-nano (reasoning)": 85.5,
+      "GPT-5.4 no reasoning": 87.0,
+      "GPT-5.4 reasoning": 87.0,
+      "GPT-5.4-mini no reasoning": 86.75,
+      "GPT-5.4-mini reasoning": 86.5,
+      "GPT-5.4-nano no reasoning": 100.0,
+      "GPT-5.4-nano reasoning": 91.75,
+      "Grok-4.1-Fast no reasoning": 82.75,
+      "Grok-4.1-Fast reasoning": 83.25,
+      "Original GPT-4o gold (baseline)": 76.75,
+      "Qwen3.5-9B Together no reasoning": 75.75
+    },
+    "GPT-5.4-nano reasoning": {
+      "GPT-5-mini (reasoning)": 91.5,
+      "GPT-5-nano (reasoning)": 89.25,
+      "GPT-5.4 no reasoning": 88.0,
+      "GPT-5.4 reasoning": 88.0,
+      "GPT-5.4-mini no reasoning": 85.5,
+      "GPT-5.4-mini reasoning": 87.75,
+      "GPT-5.4-nano no reasoning": 91.75,
+      "GPT-5.4-nano reasoning": 100.0,
+      "Grok-4.1-Fast no reasoning": 82.75,
+      "Grok-4.1-Fast reasoning": 84.0,
+      "Original GPT-4o gold (baseline)": 76.5,
+      "Qwen3.5-9B Together no reasoning": 77.25
+    },
+    "Grok-4.1-Fast no reasoning": {
+      "GPT-5-mini (reasoning)": 84.0,
+      "GPT-5-nano (reasoning)": 80.25,
+      "GPT-5.4 no reasoning": 86.75,
+      "GPT-5.4 reasoning": 84.0,
+      "GPT-5.4-mini no reasoning": 82.0,
+      "GPT-5.4-mini reasoning": 84.5,
+      "GPT-5.4-nano no reasoning": 82.75,
+      "GPT-5.4-nano reasoning": 82.75,
+      "Grok-4.1-Fast no reasoning": 100.0,
+      "Grok-4.1-Fast reasoning": 87.75,
+      "Original GPT-4o gold (baseline)": 77.5,
+      "Qwen3.5-9B Together no reasoning": 72.5
+    },
+    "Grok-4.1-Fast reasoning": {
+      "GPT-5-mini (reasoning)": 82.25,
+      "GPT-5-nano (reasoning)": 80.0,
+      "GPT-5.4 no reasoning": 87.0,
+      "GPT-5.4 reasoning": 85.75,
+      "GPT-5.4-mini no reasoning": 80.25,
+      "GPT-5.4-mini reasoning": 82.0,
+      "GPT-5.4-nano no reasoning": 83.25,
+      "GPT-5.4-nano reasoning": 84.0,
+      "Grok-4.1-Fast no reasoning": 87.75,
+      "Grok-4.1-Fast reasoning": 100.0,
+      "Original GPT-4o gold (baseline)": 78.25,
+      "Qwen3.5-9B Together no reasoning": 71.75
+    },
+    "Original GPT-4o gold (baseline)": {
+      "GPT-5-mini (reasoning)": 78.0,
+      "GPT-5-nano (reasoning)": 74.25,
+      "GPT-5.4 no reasoning": 79.75,
+      "GPT-5.4 reasoning": 79.25,
+      "GPT-5.4-mini no reasoning": 76.5,
+      "GPT-5.4-mini reasoning": 77.0,
+      "GPT-5.4-nano no reasoning": 76.75,
+      "GPT-5.4-nano reasoning": 76.5,
+      "Grok-4.1-Fast no reasoning": 77.5,
+      "Grok-4.1-Fast reasoning": 78.25,
+      "Original GPT-4o gold (baseline)": 100.0,
+      "Qwen3.5-9B Together no reasoning": 68.75
+    },
+    "Qwen3.5-9B Together no reasoning": {
+      "GPT-5-mini (reasoning)": 75.5,
+      "GPT-5-nano (reasoning)": 76.0,
+      "GPT-5.4 no reasoning": 74.5,
+      "GPT-5.4 reasoning": 73.75,
+      "GPT-5.4-mini no reasoning": 72.75,
+      "GPT-5.4-mini reasoning": 74.5,
+      "GPT-5.4-nano no reasoning": 75.75,
+      "GPT-5.4-nano reasoning": 77.25,
+      "Grok-4.1-Fast no reasoning": 72.5,
+      "Grok-4.1-Fast reasoning": 71.75,
+      "Original GPT-4o gold (baseline)": 68.75,
+      "Qwen3.5-9B Together no reasoning": 100.0
+    }
+  },
+  "pairwise_agreement_pct_revised_gold": {
+    "GPT-5-mini (reasoning)": {
+      "GPT-5-mini (reasoning)": 100.0,
+      "GPT-5-nano (reasoning)": 91.75,
+      "GPT-5.4 no reasoning": 86.75,
+      "GPT-5.4 reasoning": 88.75,
+      "GPT-5.4-mini no reasoning": 85.25,
+      "GPT-5.4-mini reasoning": 89.75,
+      "GPT-5.4-nano no reasoning": 88.25,
+      "GPT-5.4-nano reasoning": 91.5,
+      "Grok-4.1-Fast no reasoning": 84.0,
+      "Grok-4.1-Fast reasoning": 82.25,
+      "Qwen3.5-9B Together no reasoning": 75.5,
+      "Revised audited gold (baseline)": 86.75
+    },
+    "GPT-5-nano (reasoning)": {
+      "GPT-5-mini (reasoning)": 91.75,
+      "GPT-5-nano (reasoning)": 100.0,
+      "GPT-5.4 no reasoning": 83.5,
+      "GPT-5.4 reasoning": 85.5,
+      "GPT-5.4-mini no reasoning": 83.0,
+      "GPT-5.4-mini reasoning": 89.5,
+      "GPT-5.4-nano no reasoning": 85.5,
+      "GPT-5.4-nano reasoning": 89.25,
+      "Grok-4.1-Fast no reasoning": 80.25,
+      "Grok-4.1-Fast reasoning": 80.0,
+      "Qwen3.5-9B Together no reasoning": 76.0,
+      "Revised audited gold (baseline)": 82.25
+    },
+    "GPT-5.4 no reasoning": {
+      "GPT-5-mini (reasoning)": 86.75,
+      "GPT-5-nano (reasoning)": 83.5,
+      "GPT-5.4 no reasoning": 100.0,
+      "GPT-5.4 reasoning": 92.25,
+      "GPT-5.4-mini no reasoning": 88.75,
+      "GPT-5.4-mini reasoning": 87.75,
+      "GPT-5.4-nano no reasoning": 87.0,
+      "GPT-5.4-nano reasoning": 88.0,
+      "Grok-4.1-Fast no reasoning": 86.75,
+      "Grok-4.1-Fast reasoning": 87.0,
+      "Qwen3.5-9B Together no reasoning": 74.5,
+      "Revised audited gold (baseline)": 93.0
+    },
+    "GPT-5.4 reasoning": {
+      "GPT-5-mini (reasoning)": 88.75,
+      "GPT-5-nano (reasoning)": 85.5,
+      "GPT-5.4 no reasoning": 92.25,
+      "GPT-5.4 reasoning": 100.0,
+      "GPT-5.4-mini no reasoning": 86.75,
+      "GPT-5.4-mini reasoning": 89.0,
+      "GPT-5.4-nano no reasoning": 87.0,
+      "GPT-5.4-nano reasoning": 88.0,
+      "Grok-4.1-Fast no reasoning": 84.0,
+      "Grok-4.1-Fast reasoning": 85.75,
+      "Qwen3.5-9B Together no reasoning": 73.75,
+      "Revised audited gold (baseline)": 91.5
+    },
+    "GPT-5.4-mini no reasoning": {
+      "GPT-5-mini (reasoning)": 85.25,
+      "GPT-5-nano (reasoning)": 83.0,
+      "GPT-5.4 no reasoning": 88.75,
+      "GPT-5.4 reasoning": 86.75,
+      "GPT-5.4-mini no reasoning": 100.0,
+      "GPT-5.4-mini reasoning": 88.25,
+      "GPT-5.4-nano no reasoning": 86.75,
+      "GPT-5.4-nano reasoning": 85.5,
+      "Grok-4.1-Fast no reasoning": 82.0,
+      "Grok-4.1-Fast reasoning": 80.25,
+      "Qwen3.5-9B Together no reasoning": 72.75,
+      "Revised audited gold (baseline)": 85.75
+    },
+    "GPT-5.4-mini reasoning": {
+      "GPT-5-mini (reasoning)": 89.75,
+      "GPT-5-nano (reasoning)": 89.5,
+      "GPT-5.4 no reasoning": 87.75,
+      "GPT-5.4 reasoning": 89.0,
+      "GPT-5.4-mini no reasoning": 88.25,
+      "GPT-5.4-mini reasoning": 100.0,
+      "GPT-5.4-nano no reasoning": 86.5,
+      "GPT-5.4-nano reasoning": 87.75,
+      "Grok-4.1-Fast no reasoning": 84.5,
+      "Grok-4.1-Fast reasoning": 82.0,
+      "Qwen3.5-9B Together no reasoning": 74.5,
+      "Revised audited gold (baseline)": 86.25
+    },
+    "GPT-5.4-nano no reasoning": {
+      "GPT-5-mini (reasoning)": 88.25,
+      "GPT-5-nano (reasoning)": 85.5,
+      "GPT-5.4 no reasoning": 87.0,
+      "GPT-5.4 reasoning": 87.0,
+      "GPT-5.4-mini no reasoning": 86.75,
+      "GPT-5.4-mini reasoning": 86.5,
+      "GPT-5.4-nano no reasoning": 100.0,
+      "GPT-5.4-nano reasoning": 91.75,
+      "Grok-4.1-Fast no reasoning": 82.75,
+      "Grok-4.1-Fast reasoning": 83.25,
+      "Qwen3.5-9B Together no reasoning": 75.75,
+      "Revised audited gold (baseline)": 85.25
+    },
+    "GPT-5.4-nano reasoning": {
+      "GPT-5-mini (reasoning)": 91.5,
+      "GPT-5-nano (reasoning)": 89.25,
+      "GPT-5.4 no reasoning": 88.0,
+      "GPT-5.4 reasoning": 88.0,
+      "GPT-5.4-mini no reasoning": 85.5,
+      "GPT-5.4-mini reasoning": 87.75,
+      "GPT-5.4-nano no reasoning": 91.75,
+      "GPT-5.4-nano reasoning": 100.0,
+      "Grok-4.1-Fast no reasoning": 82.75,
+      "Grok-4.1-Fast reasoning": 84.0,
+      "Qwen3.5-9B Together no reasoning": 77.25,
+      "Revised audited gold (baseline)": 85.75
+    },
+    "Grok-4.1-Fast no reasoning": {
+      "GPT-5-mini (reasoning)": 84.0,
+      "GPT-5-nano (reasoning)": 80.25,
+      "GPT-5.4 no reasoning": 86.75,
+      "GPT-5.4 reasoning": 84.0,
+      "GPT-5.4-mini no reasoning": 82.0,
+      "GPT-5.4-mini reasoning": 84.5,
+      "GPT-5.4-nano no reasoning": 82.75,
+      "GPT-5.4-nano reasoning": 82.75,
+      "Grok-4.1-Fast no reasoning": 100.0,
+      "Grok-4.1-Fast reasoning": 87.75,
+      "Qwen3.5-9B Together no reasoning": 72.5,
+      "Revised audited gold (baseline)": 88.0
+    },
+    "Grok-4.1-Fast reasoning": {
+      "GPT-5-mini (reasoning)": 82.25,
+      "GPT-5-nano (reasoning)": 80.0,
+      "GPT-5.4 no reasoning": 87.0,
+      "GPT-5.4 reasoning": 85.75,
+      "GPT-5.4-mini no reasoning": 80.25,
+      "GPT-5.4-mini reasoning": 82.0,
+      "GPT-5.4-nano no reasoning": 83.25,
+      "GPT-5.4-nano reasoning": 84.0,
+      "Grok-4.1-Fast no reasoning": 87.75,
+      "Grok-4.1-Fast reasoning": 100.0,
+      "Qwen3.5-9B Together no reasoning": 71.75,
+      "Revised audited gold (baseline)": 89.5
+    },
+    "Qwen3.5-9B Together no reasoning": {
+      "GPT-5-mini (reasoning)": 75.5,
+      "GPT-5-nano (reasoning)": 76.0,
+      "GPT-5.4 no reasoning": 74.5,
+      "GPT-5.4 reasoning": 73.75,
+      "GPT-5.4-mini no reasoning": 72.75,
+      "GPT-5.4-mini reasoning": 74.5,
+      "GPT-5.4-nano no reasoning": 75.75,
+      "GPT-5.4-nano reasoning": 77.25,
+      "Grok-4.1-Fast no reasoning": 72.5,
+      "Grok-4.1-Fast reasoning": 71.75,
+      "Qwen3.5-9B Together no reasoning": 100.0,
+      "Revised audited gold (baseline)": 74.0
+    },
+    "Revised audited gold (baseline)": {
+      "GPT-5-mini (reasoning)": 86.75,
+      "GPT-5-nano (reasoning)": 82.25,
+      "GPT-5.4 no reasoning": 93.0,
+      "GPT-5.4 reasoning": 91.5,
+      "GPT-5.4-mini no reasoning": 85.75,
+      "GPT-5.4-mini reasoning": 86.25,
+      "GPT-5.4-nano no reasoning": 85.25,
+      "GPT-5.4-nano reasoning": 85.75,
+      "Grok-4.1-Fast no reasoning": 88.0,
+      "Grok-4.1-Fast reasoning": 89.5,
+      "Qwen3.5-9B Together no reasoning": 74.0,
+      "Revised audited gold (baseline)": 100.0
+    }
+  },
+  "row_level_shift": [
+    {
+      "key": "openai_gpt-5.4_no_reasoning",
+      "name": "GPT-5.4\nno reasoning",
+      "net_rows": 53,
+      "newly_correct": 53,
+      "newly_wrong": 0,
+      "pp_lift": 13.25
+    },
+    {
+      "key": "openai_gpt-5.4_reasoning_medium",
+      "name": "GPT-5.4\nreasoning",
+      "net_rows": 49,
+      "newly_correct": 50,
+      "newly_wrong": 1,
+      "pp_lift": 12.25
+    },
+    {
+      "key": "x-ai_grok-4.1-fast_reasoning_medium",
+      "name": "Grok-4.1-Fast\nreasoning",
+      "net_rows": 45,
+      "newly_correct": 48,
+      "newly_wrong": 3,
+      "pp_lift": 11.25
+    },
+    {
+      "key": "openai_gpt-5-mini",
+      "name": "GPT-5-mini\n(reasoning)",
+      "net_rows": 35,
+      "newly_correct": 41,
+      "newly_wrong": 6,
+      "pp_lift": 8.75
+    },
+    {
+      "key": "x-ai_grok-4.1-fast_no_reasoning",
+      "name": "Grok-4.1-Fast\nno reasoning",
+      "net_rows": 42,
+      "newly_correct": 47,
+      "newly_wrong": 5,
+      "pp_lift": 10.5
+    },
+    {
+      "key": "openai_gpt-5.4-mini_reasoning",
+      "name": "GPT-5.4-mini\nreasoning",
+      "net_rows": 37,
+      "newly_correct": 41,
+      "newly_wrong": 4,
+      "pp_lift": 9.25
+    },
+    {
+      "key": "openai_gpt-5.4-nano_no_reasoning",
+      "name": "GPT-5.4-nano\nno reasoning",
+      "net_rows": 34,
+      "newly_correct": 39,
+      "newly_wrong": 5,
+      "pp_lift": 8.5
+    },
+    {
+      "key": "openai_gpt-5.4-mini_no_reasoning",
+      "name": "GPT-5.4-mini\nno reasoning",
+      "net_rows": 37,
+      "newly_correct": 41,
+      "newly_wrong": 4,
+      "pp_lift": 9.25
+    },
+    {
+      "key": "openai_gpt-5.4-nano_reasoning",
+      "name": "GPT-5.4-nano\nreasoning",
+      "net_rows": 37,
+      "newly_correct": 41,
+      "newly_wrong": 4,
+      "pp_lift": 9.25
+    },
+    {
+      "key": "openai_gpt-5-nano",
+      "name": "GPT-5-nano\n(reasoning)",
+      "net_rows": 32,
+      "newly_correct": 37,
+      "newly_wrong": 5,
+      "pp_lift": 8.0
+    },
+    {
+      "key": "qwen_qwen3.5-9b_together_no_reasoning",
+      "name": "Qwen3.5-9B\nTogether no reasoning",
+      "net_rows": 21,
+      "newly_correct": 31,
+      "newly_wrong": 10,
+      "pp_lift": 5.25
+    }
+  ]
+}

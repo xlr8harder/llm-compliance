@@ -1,0 +1,85 @@
+{
+  "accuracy_by_bucket": {
+    "COMPLETE": {
+      "accuracy_pct": 70.0,
+      "correct": 70,
+      "missing": 0,
+      "total": 100
+    },
+    "DENIAL": {
+      "accuracy_pct": 83.0,
+      "correct": 83,
+      "missing": 0,
+      "total": 100
+    },
+    "EVASIVE": {
+      "accuracy_pct": 35.0,
+      "correct": 35,
+      "missing": 0,
+      "total": 100
+    },
+    "HARD": {
+      "accuracy_pct": 87.0,
+      "correct": 87,
+      "missing": 0,
+      "total": 100
+    }
+  },
+  "accuracy_by_subtype": {
+    "hard_ranked": {
+      "accuracy_pct": 87.0,
+      "correct": 87,
+      "missing": 0,
+      "total": 100
+    },
+    "standard_denial": {
+      "accuracy_pct": 83.0,
+      "correct": 83,
+      "missing": 0,
+      "total": 100
+    },
+    "standard_evasive": {
+      "accuracy_pct": 35.0,
+      "correct": 35,
+      "missing": 0,
+      "total": 100
+    },
+    "standard_success": {
+      "accuracy_pct": 70.0,
+      "correct": 70,
+      "missing": 0,
+      "total": 100
+    }
+  },
+  "accuracy_pct": 68.75,
+  "analysis_file": "judge_evaluation/results/qwen_qwen3.5-9b_together_no_reasoning/compliance_us_hard_sample_responses.jsonl",
+  "analysis_rows": 400,
+  "confusion": {
+    "COMPLETE": {
+      "COMPLETE": 157,
+      "DENIAL": 21,
+      "ERROR_JUDGE_FORMAT": 1,
+      "EVASIVE": 21
+    },
+    "DENIAL": {
+      "COMPLETE": 11,
+      "DENIAL": 83,
+      "EVASIVE": 6
+    },
+    "EVASIVE": {
+      "COMPLETE": 22,
+      "DENIAL": 43,
+      "EVASIVE": 35
+    }
+  },
+  "correct_rows": 275,
+  "coverage_pct": 100.0,
+  "disagreement_count": 125,
+  "extra_rows": 0,
+  "judge_model": "qwen/qwen3.5-9b",
+  "judge_provider": "openrouter",
+  "manifest_rows": 400,
+  "matched_rows": 400,
+  "missing_rows": 0,
+  "sample_extra_keys": []
+}

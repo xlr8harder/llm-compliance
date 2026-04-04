@@ -1,0 +1,67 @@
+{
+  "jobs": 1,
+  "workers_per_file": 10,
+  "judge_model": "x-ai/grok-4.1-fast",
+  "judge_provider": "openrouter",
+  "output_dir": "analysis",
+  "log_dir": "analysis/judge_queue_logs",
+  "total_files": 9,
+  "failed_files": 0,
+  "elapsed_seconds": 5503.499,
+  "results": [
+    {
+      "response_file": "responses/us_hard_google_gemma-4-31b-it-reasoning.jsonl",
+      "log_path": "analysis/judge_queue_logs/us_hard_google_gemma-4-31b-it-reasoning.log",
+      "returncode": 0,
+      "elapsed_seconds": 606.069
+    },
+    {
+      "response_file": "responses/us_hard_google_gemma-4-31b-it.jsonl",
+      "log_path": "analysis/judge_queue_logs/us_hard_google_gemma-4-31b-it.log",
+      "returncode": 0,
+      "elapsed_seconds": 632.962
+    },
+    {
+      "response_file": "responses/us_hard_qwen_qwen3.6-plus-reasoning.jsonl",
+      "log_path": "analysis/judge_queue_logs/us_hard_qwen_qwen3.6-plus-reasoning.log",
+      "returncode": 0,
+      "elapsed_seconds": 636.825
+    },
+    {
+      "response_file": "responses/us_hard_xiaomi_mimo-v2-omni-reasoning.jsonl",
+      "log_path": "analysis/judge_queue_logs/us_hard_xiaomi_mimo-v2-omni-reasoning.log",
+      "returncode": 0,
+      "elapsed_seconds": 521.292
+    },
+    {
+      "response_file": "responses/us_hard_xiaomi_mimo-v2-omni.jsonl",
+      "log_path": "analysis/judge_queue_logs/us_hard_xiaomi_mimo-v2-omni.log",
+      "returncode": 0,
+      "elapsed_seconds": 669.215
+    },
+    {
+      "response_file": "responses/us_hard_xiaomi_mimo-v2-pro-reasoning.jsonl",
+      "log_path": "analysis/judge_queue_logs/us_hard_xiaomi_mimo-v2-pro-reasoning.log",
+      "returncode": 0,
+      "elapsed_seconds": 665.541
+    },
+    {
+      "response_file": "responses/us_hard_xiaomi_mimo-v2-pro.jsonl",
+      "log_path": "analysis/judge_queue_logs/us_hard_xiaomi_mimo-v2-pro.log",
+      "returncode": 0,
+      "elapsed_seconds": 577.939
+    },
+    {
+      "response_file": "responses/us_hard_z-ai_glm-5v-turbo-reasoning.jsonl",
+      "log_path": "analysis/judge_queue_logs/us_hard_z-ai_glm-5v-turbo-reasoning.log",
+      "returncode": 0,
+      "elapsed_seconds": 626.393
+    },
+    {
+      "response_file": "responses/us_hard_z-ai_glm-5v-turbo.jsonl",
+      "log_path": "analysis/judge_queue_logs/us_hard_z-ai_glm-5v-turbo.log",
+      "returncode": 0,
+      "elapsed_seconds": 567.262
+    }
+  ]
+}

@@ -1,0 +1,167 @@
+{
+  "consensus_summary": {
+    "by_bucket": {
+      "COMPLETE": 7,
+      "DENIAL": 17,
+      "EVASIVE": 34,
+      "HARD": 2
+    },
+    "by_transition": {
+      "COMPLETE->EVASIVE": 9,
+      "DENIAL->COMPLETE": 6,
+      "DENIAL->EVASIVE": 11,
+      "EVASIVE->COMPLETE": 20,
+      "EVASIVE->DENIAL": 14
+    },
+    "candidate_count": 60,
+    "consensus_threshold": 3,
+    "judge_keys": [
+      "openai_gpt-5.4_no_reasoning",
+      "openai_gpt-5.4_reasoning_medium",
+      "x-ai_grok-4.1-fast_no_reasoning",
+      "x-ai_grok-4.1-fast_reasoning_medium"
+    ]
+  },
+  "scorecard": [
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": {
+          "accuracy_pct": 90.0,
+          "correct": 90,
+          "missing": 0,
+          "total": 100
+        },
+        "DENIAL": {
+          "accuracy_pct": 80.0,
+          "correct": 80,
+          "missing": 0,
+          "total": 100
+        },
+        "EVASIVE": {
+          "accuracy_pct": 52.0,
+          "correct": 52,
+          "missing": 0,
+          "total": 100
+        },
+        "HARD": {
+          "accuracy_pct": 97.0,
+          "correct": 97,
+          "missing": 0,
+          "total": 100
+        }
+      },
+      "accuracy_pct": 79.75,
+      "analysis_file": "judge_evaluation/results/openai_gpt-5.4_no_reasoning/compliance_us_hard_sample_responses.jsonl",
+      "disagreement_count": 81,
+      "judge_key": "openai_gpt-5.4_no_reasoning",
+      "judge_model": "openai/gpt-5.4",
+      "judge_provider": "openrouter",
+      "missing_rows": 0
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": {
+          "accuracy_pct": 90.0,
+          "correct": 90,
+          "missing": 0,
+          "total": 100
+        },
+        "DENIAL": {
+          "accuracy_pct": 81.0,
+          "correct": 81,
+          "missing": 0,
+          "total": 100
+        },
+        "EVASIVE": {
+          "accuracy_pct": 47.0,
+          "correct": 47,
+          "missing": 0,
+          "total": 100
+        },
+        "HARD": {
+          "accuracy_pct": 99.0,
+          "correct": 99,
+          "missing": 0,
+          "total": 100
+        }
+      },
+      "accuracy_pct": 79.25,
+      "analysis_file": "judge_evaluation/results/openai_gpt-5.4_reasoning_medium/compliance_us_hard_sample_responses.jsonl",
+      "disagreement_count": 83,
+      "judge_key": "openai_gpt-5.4_reasoning_medium",
+      "judge_model": "openai/gpt-5.4",
+      "judge_provider": "openrouter",
+      "missing_rows": 0
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": {
+          "accuracy_pct": 86.0,
+          "correct": 86,
+          "missing": 0,
+          "total": 100
+        },
+        "DENIAL": {
+          "accuracy_pct": 73.0,
+          "correct": 73,
+          "missing": 0,
+          "total": 100
+        },
+        "EVASIVE": {
+          "accuracy_pct": 60.0,
+          "correct": 60,
+          "missing": 0,
+          "total": 100
+        },
+        "HARD": {
+          "accuracy_pct": 94.0,
+          "correct": 94,
+          "missing": 0,
+          "total": 100
+        }
+      },
+      "accuracy_pct": 78.25,
+      "analysis_file": "judge_evaluation/results/x-ai_grok-4.1-fast_reasoning_medium/compliance_us_hard_sample_responses.jsonl",
+      "disagreement_count": 87,
+      "judge_key": "x-ai_grok-4.1-fast_reasoning_medium",
+      "judge_model": "x-ai/grok-4.1-fast",
+      "judge_provider": "openrouter",
+      "missing_rows": 0
+    },
+    {
+      "accuracy_by_bucket": {
+        "COMPLETE": {
+          "accuracy_pct": 82.0,
+          "correct": 82,
+          "missing": 0,
+          "total": 100
+        },
+        "DENIAL": {
+          "accuracy_pct": 81.0,
+          "correct": 81,
+          "missing": 0,
+          "total": 100
+        },
+        "EVASIVE": {
+          "accuracy_pct": 55.0,
+          "correct": 55,
+          "missing": 0,
+          "total": 100
+        },
+        "HARD": {
+          "accuracy_pct": 92.0,
+          "correct": 92,
+          "missing": 0,
+          "total": 100
+        }
+      },
+      "accuracy_pct": 77.5,
+      "analysis_file": "judge_evaluation/results/x-ai_grok-4.1-fast_no_reasoning/compliance_us_hard_sample_responses.jsonl",
+      "disagreement_count": 90,
+      "judge_key": "x-ai_grok-4.1-fast_no_reasoning",
+      "judge_model": "x-ai/grok-4.1-fast",
+      "judge_provider": "openrouter",
+      "missing_rows": 0
+    }
+  ]
+}
