@@ -2,6 +2,10 @@ version = 1
 revision = 3
 requires-python = ">=3.13"
 
+[options]
+exclude-newer = "2026-03-30T06:24:17.990255857Z"
+exclude-newer-span = "P7D"
+
 [[package]]
 name = "altair"
 version = "6.0.0"

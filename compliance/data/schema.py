@@ -77,6 +77,18 @@ class ModelResponse:
         except Exception:  # noqa: BLE001
             return None
 
+    def _message_content(self) -> Any:
+        """Return assistant content from the first choice message when present."""
+        try:
+            return self.response["choices"][0].get("message", {}).get("content")
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _has_missing_final_content(self) -> bool:
+        """True when the provider returned no final assistant content."""
+        content = self._message_content()
+        return content is None or content == ""
+
     def _contains_api_error(self) -> bool:
         """
         Tight clone of the old utils.llm_client.is_permanent_api_error
@@ -103,15 +115,8 @@ class ModelResponse:
             return True
         if self._finish_reason() == "error":
             return True
-        # structurally‐valid but empty content
-        try:
-            if (
-                self.response.get("choices")
-                and self.response["choices"][0].get("message", {}).get("content") == ""
-            ):
-                return True
-        except Exception:  # noqa: BLE001
-            pass
+        if self._has_missing_final_content():
+            return True
         return False
 
     def is_success(self) -> bool:

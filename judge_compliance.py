@@ -157,6 +157,21 @@ def load_jsonl_safe(path: Path, cls):
     return JSONLHandler.load_jsonl(path, cls)
 
 
+def is_judge_side_error(compliance_code: Optional[str]) -> bool:
+    """Return True for stored judge-side failure markers."""
+    return isinstance(compliance_code, str) and compliance_code.startswith("ERROR_JUDGE_")
+
+
+def analysis_matches_current_response_state(
+    resp: ModelResponse,
+    analysis: ComplianceAnalysis,
+) -> bool:
+    """Return True when the analysis is compatible with the current response state."""
+    if resp.is_success():
+        return analysis.compliance != "ERROR_ORIGINAL_RESPONSE"
+    return analysis.compliance == "ERROR_ORIGINAL_RESPONSE"
+
+
 @contextmanager
 def analysis_output_lock(analysis_path: Path):
     """Acquire a fail-fast lock for one analysis output file."""
@@ -367,22 +382,28 @@ def process_file(
         # create a map of current responses by question_id for timestamp comparison.
         responses_map = {resp.question_id: resp for resp in model_responses}
 
-        # clean up analyses map: remove entries that are outdated
+        # Clean up analyses map: keep only analyses that still correspond to an
+        # existing response row, are newer than that response, and are not
+        # judge-side errors or stale original-response judgments.
         cleaned_analyses = {}
         for qid, analysis in analyses_map.items():
             current_resp = responses_map.get(qid)
             compliance_code = getattr(analysis, "compliance", "") or ""
-            if isinstance(compliance_code, str) and compliance_code.startswith("ERROR_JUDGE_"):
+            if is_judge_side_error(compliance_code):
                 # Drop judge-side errors from the kept set so a retry rewrites the
                 # file without leaving stale error rows alongside the new result.
                 continue
             if current_resp is None:
-                # keep analysis for resposnes that no longer exist in input, though
-                # this shouldn't probably happen
-                cleaned_analyses[qid] = analysis
-            elif analysis.timestamp is not None and current_resp.timestamp <= analysis.timestamp:
-                # keep analysis if it's newer than or equal to response
-                cleaned_analyses[qid] = analysis
+                # Response row no longer exists (for example after FRPE cleanup).
+                # Drop the stale analysis row rather than preserving orphaned output.
+                continue
+            if analysis.timestamp is None:
+                continue
+            if current_resp.timestamp > analysis.timestamp:
+                continue
+            if not analysis_matches_current_response_state(current_resp, analysis):
+                continue
+            cleaned_analyses[qid] = analysis
         if cleaned_analyses:
             JSONLHandler.save_jsonl(list(cleaned_analyses.values()), analysis_path, append=False)
             LOGGER.info("Cleaned analysis file: kept %d entries, will re-judge others", len(cleaned_analyses))
@@ -392,21 +413,11 @@ def process_file(
             LOGGER.info("Removed analysis file: will re-judge all entries")
         analyses_map = cleaned_analyses
 
-        # Work list: new, updated, or judge‑error responses
+        # Work list: anything not preserved in cleaned_analyses must be judged.
         to_judge: List[ModelResponse] = []
         for resp in model_responses:
             existing = analyses_map.get(resp.question_id)
-            # Re‑judge if:
-            #   * there's no existing analysis,
-            #   * the response is newer than the last analysis, or
-            #   * the previous analysis indicates a judge‑side error (e.g. ERROR_JUDGE_FORMAT)
-            needs_rejudge_for_judge_error = False
-            if existing is not None:
-                compliance_code = getattr(existing, "compliance", "") or ""
-                if isinstance(compliance_code, str) and compliance_code.startswith("ERROR_JUDGE_"):
-                    needs_rejudge_for_judge_error = True
-
-            if existing is None or resp.timestamp > existing.timestamp or needs_rejudge_for_judge_error:
+            if existing is None:
                 to_judge.append(resp)
 
         LOGGER.info(

@@ -34,6 +34,12 @@ as close to zero as practical, judging compliance, and publishing to Speechmap.
 - Goal: for models that support both operational modes, maintain a pair:
   - base mode: `<model>` (non-reasoning)
   - reasoning mode: `<model>-reasoning`
+- Important naming distinction:
+  - In this repo, `-reasoning` is usually a local canonical-name suffix, not an
+    API model ID.
+  - For OpenRouter retries/tests/probes, use the actual provider model ID from
+    `model_catalog.jsonl` (or from prior response rows such as `api_model` /
+    `response.model`) rather than assuming the canonical name is callable.
 - Do a cheap mode probe before full runs when behavior is unclear.
   - Standard command:
     `uv run python tools/probe_reasoning.py --provider openrouter --model <model_id>`
@@ -103,6 +109,17 @@ a stable point. After that, any remaining errors are likely moderation-layer
 failures and can be accepted. Note: moderation layers can be racy (some models
 start answering while moderation is still processing), so it is normal for a
 few to slip through even when the only failures are moderation-related.
+- Useful interpretation hints for stable residuals:
+  - Moderation-layer failures can be either explicit or implicit.
+  - Explicit cases may show up as clear moderation/provider block payloads or
+    other obvious policy-enforcement errors.
+  - Implicit cases have to be inferred from the response shape.
+  - If residual rows cluster on sensitive prompts and the payload shows
+    `message.content` missing/empty with `finish_reason: "stop"` and no
+    explicit provider error, treat that as likely moderation-layer suppression.
+  - If residual rows remain as top-level API errors, `choices[0].error`, or
+    obvious 429/5xx-style upstream failures on non-sensitive prompts, treat
+    that as provider instability rather than hidden moderation.
 
 ## Judge compliance
 1) Run the judge:
