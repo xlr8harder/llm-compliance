@@ -20,20 +20,26 @@ as close to zero as practical, judging compliance, and publishing to Speechmap.
   - `preprocess.py` in `../speechmap`: allow at least 30 minutes.
   - `git` operations (add/commit/push): allow longer timeouts due to large files.
 - If not provided, ask:
-  - Whether to use `--reasoning` or `--no-reasoning`.
+  - Whether to run `--reasoning`, `--no-reasoning`, or both. For standard new
+    model work, probe first and run both modes when the model reliably supports
+    both.
   - The canonical model name (use the API name unless a more specific label is needed).
   - If unsure, probe with the standardized tool before the full run:
     - `uv run python tools/probe_reasoning.py --provider openrouter --model <model_id>`
     - This runs Probe A/B automatically and Probe C only when needed, then
       recommends canonical naming plus the run flags to use.
-  - Default policy: if reasoning traces are returned in a probe, use `--reasoning`.
-    `ask.py` then treats missing reasoning as an error, which helps catch
-    misconfigured OpenRouter subproviders.
+  - Default policy: if the probe shows both base and reasoning modes work, run
+    the base mode with `--no-reasoning` and canonical name `<model>`, and run
+    reasoning mode with `--reasoning` and canonical name `<model>-reasoning`.
+    `ask.py` treats missing reasoning as an error when `--reasoning` is used,
+    which helps catch misconfigured OpenRouter subproviders.
 
 ## Reasoning mode policy
 - Goal: for models that support both operational modes, maintain a pair:
   - base mode: `<model>` (non-reasoning)
   - reasoning mode: `<model>-reasoning`
+  Run the full response, retry, and judge pipeline for both entries when both
+  modes are supported.
 - Important naming distinction:
   - In this repo, `-reasoning` is usually a local canonical-name suffix, not an
     API model ID.
