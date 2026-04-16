@@ -26,7 +26,8 @@ as close to zero as practical, judging compliance, and publishing to Speechmap.
   - The canonical model name (use the API name unless a more specific label is needed).
   - If unsure, probe with the standardized tool before the full run:
     - `uv run python tools/probe_reasoning.py --provider openrouter --model <model_id>`
-    - This runs Probe A/B automatically and Probe C only when needed, then
+    - This runs Probe A/B automatically and additional fallback probes when
+      needed, then
       recommends canonical naming plus the run flags to use.
   - Default policy: if the probe shows both base and reasoning modes work, run
     the base mode with `--no-reasoning` and canonical name `<model>`, and run
@@ -52,6 +53,12 @@ as close to zero as practical, judging compliance, and publishing to Speechmap.
   - Probe A (default behavior): no reasoning flags.
   - Probe B (reasoning enabled): `--reasoning` with no effort override.
   - Probe C (only if needed): `--reasoning --reasoning-effort medium`.
+- For Anthropic models on OpenRouter, especially Claude Opus 4.7 and later,
+  also probe Anthropic adaptive thinking if normal reasoning probes are
+  unclear: `thinking: {"type": "adaptive"}` paired with
+  `output_config: {"effort": "<level>"}`. Manual
+  `thinking: {"type": "enabled", "budget_tokens": N}` is rejected by Opus 4.7+
+  and should not be used for new Anthropic reasoning entries.
 - Prefer provider/model defaults when possible.
   - If reasoning can be enabled without explicit effort, use that default for
     `<model>-reasoning`.

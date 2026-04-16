@@ -31,7 +31,10 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-DEFAULT_PROMPT = "Explain briefly why the sky appears blue."
+DEFAULT_PROMPT = (
+    "Solve carefully. You have 12 coins, one is counterfeit and may be heavier or lighter. "
+    "Using a balance scale exactly three times, outline a complete decision procedure."
+)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -66,6 +69,28 @@ def build_probe_overrides(base_overrides: Dict[str, Any], probe: str) -> Dict[st
         request_overrides["reasoning"] = {"enabled": True}
     elif probe == "reasoning-medium":
         request_overrides["reasoning"] = {"enabled": True, "effort": "medium"}
+    elif probe == "reasoning-effort-medium":
+        request_overrides["reasoning"] = {"effort": "medium"}
+    elif probe == "reasoning-effort-high":
+        request_overrides["reasoning"] = {"effort": "high"}
+    elif probe == "anthropic-adaptive-medium":
+        request_overrides["thinking"] = {"type": "adaptive"}
+        request_overrides["output_config"] = {"effort": "medium"}
+    elif probe == "anthropic-adaptive-max":
+        request_overrides["thinking"] = {"type": "adaptive"}
+        request_overrides["output_config"] = {"effort": "max"}
+    elif probe == "anthropic-adaptive-xhigh":
+        request_overrides["thinking"] = {"type": "adaptive"}
+        request_overrides["output_config"] = {"effort": "xhigh"}
+    elif probe == "reasoning-verbosity-medium":
+        request_overrides["reasoning"] = {"enabled": True}
+        request_overrides["verbosity"] = "medium"
+    elif probe == "reasoning-verbosity-medium-budget":
+        request_overrides["reasoning"] = {"max_tokens": 1024}
+        request_overrides["verbosity"] = "medium"
+    elif probe == "reasoning-verbosity-max":
+        request_overrides["reasoning"] = {"enabled": True}
+        request_overrides["verbosity"] = "max"
     elif probe == "no-reasoning":
         request_overrides["reasoning"] = {"enabled": False}
     elif probe != "default":
@@ -130,16 +155,65 @@ def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) 
     default_present = reasoning_present(by_probe.get("default"))
     reasoning_present_default = reasoning_present(by_probe.get("reasoning"))
     reasoning_present_medium = reasoning_present(by_probe.get("reasoning-medium"))
+    reasoning_present_effort_high = reasoning_present(by_probe.get("reasoning-effort-high"))
+    reasoning_present_effort_medium = reasoning_present(by_probe.get("reasoning-effort-medium"))
+    reasoning_present_anthropic_adaptive_medium = reasoning_present(
+        by_probe.get("anthropic-adaptive-medium")
+    )
+    reasoning_present_anthropic_adaptive_max = reasoning_present(
+        by_probe.get("anthropic-adaptive-max")
+    )
+    reasoning_present_anthropic_adaptive_xhigh = reasoning_present(
+        by_probe.get("anthropic-adaptive-xhigh")
+    )
+    reasoning_present_verbosity_medium = reasoning_present(by_probe.get("reasoning-verbosity-medium"))
+    reasoning_present_verbosity_medium_budget = reasoning_present(
+        by_probe.get("reasoning-verbosity-medium-budget")
+    )
+    reasoning_present_verbosity_max = reasoning_present(by_probe.get("reasoning-verbosity-max"))
     no_reasoning_present = reasoning_present(by_probe.get("no-reasoning"))
 
     reasoning_probe = None
     reasoning_flags: Optional[List[str]] = None
+    reasoning_request_overrides: Optional[Dict[str, Any]] = None
     if reasoning_present_default is True:
         reasoning_probe = "reasoning"
         reasoning_flags = ["--reasoning"]
+    elif reasoning_present_effort_high is True:
+        reasoning_probe = "reasoning-effort-high"
+        reasoning_flags = ["--reasoning"]
+        reasoning_request_overrides = {"reasoning": {"effort": "high"}}
+    elif reasoning_present_effort_medium is True:
+        reasoning_probe = "reasoning-effort-medium"
+        reasoning_flags = ["--reasoning"]
+        reasoning_request_overrides = {"reasoning": {"effort": "medium"}}
     elif reasoning_present_medium is True:
         reasoning_probe = "reasoning-medium"
         reasoning_flags = ["--reasoning", "--reasoning-effort", "medium"]
+    elif reasoning_present_anthropic_adaptive_medium is True:
+        reasoning_probe = "anthropic-adaptive-medium"
+        reasoning_flags = ["--reasoning"]
+        reasoning_request_overrides = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "medium"}}
+    elif reasoning_present_anthropic_adaptive_max is True:
+        reasoning_probe = "anthropic-adaptive-max"
+        reasoning_flags = ["--reasoning"]
+        reasoning_request_overrides = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "max"}}
+    elif reasoning_present_anthropic_adaptive_xhigh is True:
+        reasoning_probe = "anthropic-adaptive-xhigh"
+        reasoning_flags = ["--reasoning"]
+        reasoning_request_overrides = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "xhigh"}}
+    elif reasoning_present_verbosity_medium is True:
+        reasoning_probe = "reasoning-verbosity-medium"
+        reasoning_flags = ["--reasoning"]
+        reasoning_request_overrides = {"verbosity": "medium"}
+    elif reasoning_present_verbosity_medium_budget is True:
+        reasoning_probe = "reasoning-verbosity-medium-budget"
+        reasoning_flags = ["--reasoning"]
+        reasoning_request_overrides = {"reasoning": {"max_tokens": 1024}, "verbosity": "medium"}
+    elif reasoning_present_verbosity_max is True:
+        reasoning_probe = "reasoning-verbosity-max"
+        reasoning_flags = ["--reasoning"]
+        reasoning_request_overrides = {"verbosity": "max"}
 
     recommendation: Dict[str, Any] = {
         "mode": "indeterminate",
@@ -147,17 +221,61 @@ def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) 
         "reasoning_canonical_name": None,
         "base_run_flags": None,
         "reasoning_run_flags": None,
+        "reasoning_request_overrides": None,
         "notes": "Probe did not produce a clear recommendation.",
     }
 
     if default_present is False and reasoning_flags:
+        if reasoning_probe == "reasoning-verbosity-max":
+            notes = (
+                "Reasoning traces appear only when reasoning is enabled together with "
+                'verbosity="max"; add that override to the reasoning catalog entry.'
+            )
+        elif reasoning_probe == "reasoning-verbosity-medium":
+            notes = (
+                "Reasoning traces appear only when reasoning is enabled together with "
+                'verbosity="medium"; add that override to the reasoning catalog entry.'
+            )
+        elif reasoning_probe == "reasoning-verbosity-medium-budget":
+            notes = (
+                "Reasoning traces appear only when reasoning uses a 1024-token budget "
+                'together with verbosity="medium"; add both overrides to the reasoning catalog entry.'
+            )
+        elif reasoning_probe == "reasoning-effort-high":
+            notes = (
+                'Reasoning traces appear with OpenRouter reasoning effort="high"; '
+                "add that override to the reasoning catalog entry."
+            )
+        elif reasoning_probe == "reasoning-effort-medium":
+            notes = (
+                'Reasoning traces appear with OpenRouter reasoning effort="medium"; '
+                "add that override to the reasoning catalog entry."
+            )
+        elif reasoning_probe == "anthropic-adaptive-medium":
+            notes = (
+                'Reasoning traces appear only with Anthropic adaptive thinking and output_config.effort="medium"; '
+                "add those overrides to the reasoning catalog entry."
+            )
+        elif reasoning_probe == "anthropic-adaptive-max":
+            notes = (
+                'Reasoning traces appear only with Anthropic adaptive thinking and output_config.effort="max"; '
+                "add those overrides to the reasoning catalog entry."
+            )
+        elif reasoning_probe == "anthropic-adaptive-xhigh":
+            notes = (
+                'Reasoning traces appear only with Anthropic adaptive thinking and output_config.effort="xhigh"; '
+                "add those overrides to the reasoning catalog entry."
+            )
+        else:
+            notes = "Reasoning traces appear only when reasoning is explicitly enabled."
         recommendation.update(
             {
                 "mode": "paired_modes",
                 "reasoning_canonical_name": f"{canonical_name}-reasoning",
                 "base_run_flags": ["--no-reasoning"],
                 "reasoning_run_flags": reasoning_flags,
-                "notes": "Reasoning traces appear only when reasoning is explicitly enabled.",
+                "reasoning_request_overrides": reasoning_request_overrides,
+                "notes": notes,
             }
         )
         return recommendation
@@ -169,6 +287,7 @@ def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) 
                 "reasoning_canonical_name": f"{canonical_name}-reasoning",
                 "base_run_flags": ["--no-reasoning"],
                 "reasoning_run_flags": reasoning_flags or ["--reasoning"],
+                "reasoning_request_overrides": reasoning_request_overrides,
                 "notes": "Default responses include reasoning traces, but explicit --no-reasoning suppresses them.",
             }
         )
@@ -231,6 +350,7 @@ def print_human_report(
     print(f"base_run_flags={recommendation.get('base_run_flags')}")
     print(f"reasoning_canonical_name={recommendation.get('reasoning_canonical_name')}")
     print(f"reasoning_run_flags={recommendation.get('reasoning_run_flags')}")
+    print(f"reasoning_request_overrides={recommendation.get('reasoning_request_overrides')}")
     print(f"notes={recommendation['notes']}")
 
 
@@ -275,10 +395,154 @@ def main(argv: Optional[List[str]] = None) -> None:
         )
     )
 
+    if (
+        reasoning_present(results[-1]) is False
+        and provider_name == "openrouter"
+        and api_model.startswith("anthropic/")
+    ):
+        results.append(
+            run_probe(
+                probe="reasoning-effort-high",
+                prompt=args.prompt,
+                provider_name=provider_name,
+                api_model=api_model,
+                base_overrides=base_overrides,
+                system_prompt=args.system_prompt,
+                force_subprovider=args.force_subprovider,
+                timeout_seconds=args.timeout_seconds,
+            )
+        )
+
+    if (
+        reasoning_present(results[-1]) is False
+        and provider_name == "openrouter"
+        and api_model.startswith("anthropic/")
+    ):
+        results.append(
+            run_probe(
+                probe="reasoning-effort-medium",
+                prompt=args.prompt,
+                provider_name=provider_name,
+                api_model=api_model,
+                base_overrides=base_overrides,
+                system_prompt=args.system_prompt,
+                force_subprovider=args.force_subprovider,
+                timeout_seconds=args.timeout_seconds,
+            )
+        )
+
     if reasoning_present(results[-1]) is False:
         results.append(
             run_probe(
                 probe="reasoning-medium",
+                prompt=args.prompt,
+                provider_name=provider_name,
+                api_model=api_model,
+                base_overrides=base_overrides,
+                system_prompt=args.system_prompt,
+                force_subprovider=args.force_subprovider,
+                timeout_seconds=args.timeout_seconds,
+            )
+        )
+
+    if (
+        reasoning_present(results[-1]) is False
+        and provider_name == "openrouter"
+        and api_model.startswith("anthropic/")
+    ):
+        results.append(
+            run_probe(
+                probe="anthropic-adaptive-medium",
+                prompt=args.prompt,
+                provider_name=provider_name,
+                api_model=api_model,
+                base_overrides=base_overrides,
+                system_prompt=args.system_prompt,
+                force_subprovider=args.force_subprovider,
+                timeout_seconds=args.timeout_seconds,
+            )
+        )
+
+    if (
+        reasoning_present(results[-1]) is False
+        and provider_name == "openrouter"
+        and api_model.startswith("anthropic/")
+    ):
+        results.append(
+            run_probe(
+                probe="anthropic-adaptive-max",
+                prompt=args.prompt,
+                provider_name=provider_name,
+                api_model=api_model,
+                base_overrides=base_overrides,
+                system_prompt=args.system_prompt,
+                force_subprovider=args.force_subprovider,
+                timeout_seconds=args.timeout_seconds,
+            )
+        )
+
+    if (
+        reasoning_present(results[-1]) is False
+        and provider_name == "openrouter"
+        and api_model.startswith("anthropic/")
+    ):
+        results.append(
+            run_probe(
+                probe="anthropic-adaptive-xhigh",
+                prompt=args.prompt,
+                provider_name=provider_name,
+                api_model=api_model,
+                base_overrides=base_overrides,
+                system_prompt=args.system_prompt,
+                force_subprovider=args.force_subprovider,
+                timeout_seconds=args.timeout_seconds,
+            )
+        )
+
+    if (
+        reasoning_present(results[-1]) is False
+        and provider_name == "openrouter"
+        and api_model.startswith("anthropic/")
+    ):
+        results.append(
+            run_probe(
+                probe="reasoning-verbosity-medium",
+                prompt=args.prompt,
+                provider_name=provider_name,
+                api_model=api_model,
+                base_overrides=base_overrides,
+                system_prompt=args.system_prompt,
+                force_subprovider=args.force_subprovider,
+                timeout_seconds=args.timeout_seconds,
+            )
+        )
+
+    if (
+        reasoning_present(results[-1]) is False
+        and provider_name == "openrouter"
+        and api_model.startswith("anthropic/")
+    ):
+        results.append(
+            run_probe(
+                probe="reasoning-verbosity-medium-budget",
+                prompt=args.prompt,
+                provider_name=provider_name,
+                api_model=api_model,
+                base_overrides=base_overrides,
+                system_prompt=args.system_prompt,
+                force_subprovider=args.force_subprovider,
+                timeout_seconds=args.timeout_seconds,
+            )
+        )
+
+    if (
+        reasoning_present(results[-1]) is False
+        and provider_name == "openrouter"
+        and api_model.startswith("anthropic/")
+    ):
+        results.append(
+            run_probe(
+                probe="reasoning-verbosity-max",
                 prompt=args.prompt,
                 provider_name=provider_name,
                 api_model=api_model,
