@@ -70,6 +70,34 @@ def summarize_reasoning_payload(raw_response: Optional[Dict[str, Any]]) -> Reaso
         summary.reasoning_detail_count = 1
         summary.has_reasoning_details = True
 
+    # Native Anthropic Messages responses expose content blocks at top level.
+    content_blocks = raw_response.get("content")
+    if isinstance(content_blocks, list):
+        summary.finish_reason = summary.finish_reason or raw_response.get("stop_reason")
+        content_chars = 0
+        reasoning_detail_count = summary.reasoning_detail_count
+        for block in content_blocks:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            if block_type == "text":
+                text = block.get("text")
+                if isinstance(text, str):
+                    content_chars += len(text)
+            elif block_type == "thinking":
+                thinking = block.get("thinking") or block.get("text")
+                if isinstance(thinking, str) and thinking.strip():
+                    summary.has_reasoning_text = True
+                reasoning_detail_count += 1
+            elif block_type == "redacted_thinking":
+                if block.get("data") or block.get("redacted_thinking"):
+                    summary.has_reasoning_details = True
+                reasoning_detail_count += 1
+        if content_chars:
+            summary.has_content = True
+            summary.content_chars = content_chars
+        summary.reasoning_detail_count = reasoning_detail_count
+
     usage = raw_response.get("usage")
     if isinstance(usage, dict):
         completion_details = usage.get("completion_tokens_details")

@@ -54,11 +54,14 @@ as close to zero as practical, judging compliance, and publishing to Speechmap.
   - Probe B (reasoning enabled): `--reasoning` with no effort override.
   - Probe C (only if needed): `--reasoning --reasoning-effort medium`.
 - For Anthropic models on OpenRouter, especially Claude Opus 4.7 and later,
-  also probe Anthropic adaptive thinking if normal reasoning probes are
-  unclear: `thinking: {"type": "adaptive"}` paired with
-  `output_config: {"effort": "<level>"}`. Manual
-  `thinking: {"type": "enabled", "budget_tokens": N}` is rejected by Opus 4.7+
-  and should not be used for new Anthropic reasoning entries.
+  also probe Anthropic adaptive thinking if normal chat-completions reasoning
+  probes are unclear. These probes must use llm_client
+  `request_format="anthropic_messages"` plus `thinking: {"type": "adaptive"}`
+  paired with `output_config: {"effort": "<level>"}`. Prefer high effort for
+  these new Anthropic adaptive entries unless probing shows a lower effort is
+  reliable. Manual `thinking: {"type": "enabled", "budget_tokens": N}` is
+  rejected by Opus 4.7+ and should not be used for new Anthropic reasoning
+  entries.
 - Prefer provider/model defaults when possible.
   - If reasoning can be enabled without explicit effort, use that default for
     `<model>-reasoning`.
@@ -91,6 +94,9 @@ uv run python ask.py \
   --workers 30 \
   --reasoning
 ```
+For OpenRouter Anthropic Messages runs, add `--request-format anthropic_messages`
+and ensure the catalog or CLI-probe recommendation supplies the corresponding
+`thinking` / `output_config` request overrides.
 Notes:
 - Do not pass `--out` for normal runs. Let `ask.py` auto-name files from the
   question set and canonical model; use the printed output path in follow-up

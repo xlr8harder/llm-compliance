@@ -241,8 +241,69 @@ def detect_metadata(responses_path: Path):
             "api_model": row.api_model,
             "canonical": row.model,
             "category": row.category,
+            "request_format": row.request_format,
         }
     raise RuntimeError(f"{responses_path} has no readable ModelResponse entries")
+
+
+def apply_reasoning_request_overrides(
+    overrides: Dict[str, Any],
+    *,
+    request_format: Optional[str],
+    reasoning: bool,
+    no_reasoning: bool,
+    reasoning_tokens: Optional[int],
+    reasoning_effort: Optional[str],
+) -> tuple[Dict[str, Any], Optional[str]]:
+    """Apply CLI reasoning switches to catalog request overrides."""
+    request_overrides = dict(overrides)
+    if not request_format and isinstance(request_overrides.get("request_format"), str):
+        request_format = str(request_overrides["request_format"])
+
+    if request_format == "anthropic_messages":
+        if reasoning_tokens is not None:
+            raise ValueError("--reasoning-tokens is not supported with --request-format anthropic_messages; use --reasoning-effort.")
+        if reasoning_effort is not None and not reasoning:
+            raise ValueError("Reasoning options require --reasoning. Specify --reasoning to enable thinking mode.")
+        if reasoning:
+            thinking_cfg = dict(request_overrides.get("thinking", {}))
+            thinking_cfg["type"] = "adaptive"
+            request_overrides["thinking"] = thinking_cfg
+            output_config = dict(request_overrides.get("output_config", {}))
+            output_config["effort"] = reasoning_effort or output_config.get("effort") or "high"
+            request_overrides["output_config"] = output_config
+        elif no_reasoning:
+            request_overrides.pop("thinking", None)
+            request_overrides.pop("output_config", None)
+        request_overrides.pop("reasoning", None)
+    else:
+        reasoning_cfg: Dict[str, Any] = dict(request_overrides.get("reasoning", {}))
+
+        if reasoning:
+            reasoning_cfg["enabled"] = True
+        elif no_reasoning:
+            reasoning_cfg["enabled"] = False
+
+        if (reasoning_tokens is not None or reasoning_effort is not None) and not reasoning_cfg.get("enabled"):
+            raise ValueError("Reasoning options require --reasoning. Specify --reasoning to enable thinking mode.")
+        if reasoning_cfg.get("enabled"):
+            if reasoning_tokens is not None:
+                reasoning_cfg["max_tokens"] = reasoning_tokens
+            if reasoning_effort is not None:
+                reasoning_cfg["effort"] = reasoning_effort
+
+        if reasoning_cfg.get("enabled") and ("max_tokens" in reasoning_cfg and "effort" in reasoning_cfg):
+            raise ValueError("Reasoning conflict: cannot set both --reasoning-tokens and --reasoning-effort.")
+
+        if "enabled" in reasoning_cfg:
+            if not reasoning_cfg["enabled"]:
+                reasoning_cfg.pop("max_tokens", None)
+                reasoning_cfg.pop("effort", None)
+            request_overrides["reasoning"] = reasoning_cfg
+
+    if request_format:
+        request_overrides["request_format"] = request_format
+    return request_overrides, request_format
 
 
 def ask_worker(
@@ -288,6 +349,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", type=Path, help="output JSONL path (normal mode)")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--max-tokens", type=int, help="Max completion tokens for each answer (unset by default)")
+    parser.add_argument(
+        "--request-format",
+        help="llm_client request format, e.g. chat_completions or anthropic_messages",
+    )
     parser.add_argument("--frpe", action="store_true", help="clean permanent errors before retrying")
     parser.add_argument(
         "--anonymize",
@@ -324,7 +389,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Disable model reasoning (sets reasoning.enabled=false where supported)",
     )
     parser.add_argument("--reasoning-tokens", type=int, help="Reasoning max_tokens budget (requires --reasoning)")
-    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], help="Reasoning effort level (requires --reasoning)")
+    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high", "max", "xhigh"], help="Reasoning effort level (requires --reasoning)")
 
     parser.add_argument("--system-prompt", help="System prompt to include in requests")
 
@@ -351,6 +416,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         provider_name = args.provider or meta["provider"]
         api_model = args.model or meta["api_model"]
         canonical_cli = args.canonical_name or meta["canonical"]
+        request_format = args.request_format or meta.get("request_format")
         category = meta["category"]
         if not category:
             LOGGER.error("Category missing in responses file – cannot locate questions file")
@@ -370,6 +436,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         provider_name = args.provider
         api_model = args.model
         canonical_cli = args.canonical_name
+        request_format = args.request_format
         questions_file = args.questions
         # Default-on anonymization if filename starts with 'anon'
         if questions_file.name.startswith("anon"):
@@ -418,37 +485,18 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     catalog_entry = catalog.get_model(canonical_name) if canonical_name else None
     overrides: Dict[str, Any] = dict(catalog_entry.get_request_overrides()) if catalog_entry else {}
 
-    # Build unified reasoning payload
-    reasoning_cfg: Dict[str, Any] = dict(overrides.get("reasoning", {}))
-
-    # CLI toggles override catalog defaults
-    if args.reasoning:
-        reasoning_cfg["enabled"] = True
-    elif getattr(args, "no_reasoning", False):
-        reasoning_cfg["enabled"] = False
-
-    # Validate option usage and apply values only when enabled
-    if (args.reasoning_tokens is not None or args.reasoning_effort is not None) and not reasoning_cfg.get("enabled"):
-        LOGGER.error("Reasoning options require --reasoning. Specify --reasoning to enable thinking mode.")
+    try:
+        overrides, request_format = apply_reasoning_request_overrides(
+            overrides,
+            request_format=request_format,
+            reasoning=args.reasoning,
+            no_reasoning=getattr(args, "no_reasoning", False),
+            reasoning_tokens=args.reasoning_tokens,
+            reasoning_effort=args.reasoning_effort,
+        )
+    except ValueError as exc:
+        LOGGER.error(str(exc))
         sys.exit(2)
-    if reasoning_cfg.get("enabled"):
-        if args.reasoning_tokens is not None:
-            reasoning_cfg["max_tokens"] = args.reasoning_tokens
-        if args.reasoning_effort is not None:
-            reasoning_cfg["effort"] = args.reasoning_effort
-
-    # Enforce one-of rule for effort vs max_tokens
-    if reasoning_cfg.get("enabled") and ("max_tokens" in reasoning_cfg and "effort" in reasoning_cfg):
-        LOGGER.error("Reasoning conflict: cannot set both --reasoning-tokens and --reasoning-effort.")
-        sys.exit(2)
-
-    # Only include a reasoning block in overrides when explicitly enabled/disabled
-    if "enabled" in reasoning_cfg:
-        # If disabled, drop any stray budget keys
-        if not reasoning_cfg["enabled"]:
-            reasoning_cfg.pop("max_tokens", None)
-            reasoning_cfg.pop("effort", None)
-        overrides["reasoning"] = reasoning_cfg
 
     # Persist catalog mapping if fully specified on CLI
     if args.canonical_name and args.provider and args.model:
@@ -475,6 +523,8 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         request_overrides.pop("reasoning", None)
     if args.max_tokens is not None:
         request_overrides["max_tokens"] = args.max_tokens
+    if request_format:
+        request_overrides["request_format"] = request_format
     subprov_info = f"subprov={args.force_subprovider or '<auto>'}"
     LOGGER.info(
         "Configuration → model=%s (canon=%s) provider=%s %s questions=%s overrides=%s %s anonymize=%s",
