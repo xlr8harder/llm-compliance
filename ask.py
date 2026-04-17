@@ -498,6 +498,9 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         LOGGER.error(str(exc))
         sys.exit(2)
 
+    if args.max_tokens is not None:
+        overrides["max_tokens"] = args.max_tokens
+
     # Persist catalog mapping if fully specified on CLI
     if args.canonical_name and args.provider and args.model:
         catalog.add_or_update_model(

@@ -198,3 +198,4 @@
 {"canonical_name": "z-ai/glm-5.1", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-5.1", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "z-ai/glm-5.1-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "z-ai/glm-5.1", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "openrouter/elephant-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/elephant-alpha", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "anthropic/claude-opus-4.7-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-opus-4.7", "priority": 0}], "request_overrides": {"thinking": {"type": "adaptive"}, "output_config": {"effort": "max"}, "request_format": "anthropic_messages", "max_tokens": 16000}}

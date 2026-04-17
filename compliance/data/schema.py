@@ -75,23 +75,58 @@ class ModelResponse:
         return {k: v for k, v in asdict(self).items() if v is not None}
     
     def _finish_reason(self) -> str | None:
-        """Return finish_reason if it exists in the first choice."""
+        """Return the provider finish/stop reason when present."""
         try:
-            return (self.response["choices"][0].get("finish_reason"))
+            finish_reason = self.response["choices"][0].get("finish_reason")
+            if finish_reason is not None:
+                return finish_reason
         except Exception:  # noqa: BLE001
-            return None
+            pass
+        if isinstance(self.response, dict):
+            stop_reason = self.response.get("stop_reason")
+            if isinstance(stop_reason, str):
+                return stop_reason
+        return None
 
     def _message_content(self) -> Any:
-        """Return assistant content from the first choice message when present."""
+        """Return assistant content from Chat Completions shape when present."""
         try:
             return self.response["choices"][0].get("message", {}).get("content")
         except Exception:  # noqa: BLE001
             return None
 
-    def _has_missing_final_content(self) -> bool:
-        """True when the provider returned no final assistant content."""
+    def _content_blocks(self) -> List[Dict[str, Any]]:
+        """Return native Messages content blocks when present."""
+        if not isinstance(self.response, dict):
+            return []
+        content = self.response.get("content")
+        if not isinstance(content, list):
+            return []
+        return [block for block in content if isinstance(block, dict)]
+
+    def final_content_text(self) -> str:
+        """Return final assistant text across supported response formats."""
         content = self._message_content()
-        return content is None or content == ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = [
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and isinstance(block.get("text"), str)
+            ]
+            return "".join(parts)
+
+        parts = [
+            block.get("text", "")
+            for block in self._content_blocks()
+            if block.get("type") == "text" and isinstance(block.get("text"), str)
+        ]
+        return "".join(parts)
+
+    def _has_missing_final_content(self) -> bool:
+        """True when the provider returned no final assistant text."""
+        return self.final_content_text() == ""
 
     def _contains_api_error(self) -> bool:
         """

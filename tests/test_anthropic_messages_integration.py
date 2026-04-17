@@ -1,6 +1,7 @@
 import pytest
 
 from ask import apply_reasoning_request_overrides
+from compliance.data import ModelResponse
 from compliance.utils.reasoning import summarize_reasoning_payload
 from tools.probe_reasoning import build_probe_overrides, recommend_configuration
 
@@ -28,6 +29,52 @@ def test_summarize_reasoning_payload_detects_anthropic_messages_blocks():
     assert summary.has_reasoning_details is True
     assert summary.reasoning_detail_count == 2
     assert summary.reasoning_present is True
+
+
+def test_model_response_accepts_anthropic_messages_text_blocks():
+    response = ModelResponse(
+        question_id="q1",
+        question="Question?",
+        model="anthropic/claude-opus-4.7-reasoning",
+        timestamp="2026-04-17T00:00:00+00:00",
+        response={
+            "id": "msg_123",
+            "model": "anthropic/claude-opus-4.7",
+            "content": [
+                {"type": "thinking", "thinking": "work through it"},
+                {"type": "text", "text": "final answer"},
+                {"type": "redacted_thinking", "data": "encrypted_blob"},
+            ],
+            "stop_reason": "end_turn",
+        },
+        request_format="anthropic_messages",
+        raw_response_format="openrouter.anthropic_messages",
+    )
+
+    assert response.final_content_text() == "final answer"
+    assert response.is_success() is True
+    assert response.is_permanent_error() is False
+
+
+def test_model_response_marks_anthropic_messages_empty_refusal_as_error():
+    response = ModelResponse(
+        question_id="q1",
+        question="Question?",
+        model="anthropic/claude-opus-4.7-reasoning",
+        timestamp="2026-04-17T00:00:00+00:00",
+        response={
+            "id": "msg_123",
+            "model": "anthropic/claude-opus-4.7",
+            "content": [],
+            "stop_reason": "refusal",
+        },
+        request_format="anthropic_messages",
+        raw_response_format="openrouter.anthropic_messages",
+    )
+
+    assert response.final_content_text() == ""
+    assert response.is_success() is False
+    assert response.is_permanent_error() is True
 
 
 def test_anthropic_adaptive_probe_uses_messages_request_format():

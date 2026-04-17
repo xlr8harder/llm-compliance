@@ -58,10 +58,16 @@ as close to zero as practical, judging compliance, and publishing to Speechmap.
   probes are unclear. These probes must use llm_client
   `request_format="anthropic_messages"` plus `thinking: {"type": "adaptive"}`
   paired with `output_config: {"effort": "<level>"}`. Prefer high effort for
-  these new Anthropic adaptive entries unless probing shows a lower effort is
-  reliable. Manual `thinking: {"type": "enabled", "budget_tokens": N}` is
+  these new Anthropic adaptive entries unless probing shows another effort is
+  needed. Manual `thinking: {"type": "enabled", "budget_tokens": N}` is
   rejected by Opus 4.7+ and should not be used for new Anthropic reasoning
   entries.
+- For `anthropic/claude-opus-4.7-reasoning` on `us_hard`, prior probes showed
+  Chat Completions reasoning and Anthropic Messages `high`/`xhigh` did not
+  reliably expose reasoning on the target prompts. Use Anthropic Messages with
+  `--reasoning --reasoning-effort max --max-tokens 16000` and persist those
+  overrides in `model_catalog.jsonl` so `--detect --frpe` retries preserve the
+  same mode.
 - Prefer provider/model defaults when possible.
   - If reasoning can be enabled without explicit effort, use that default for
     `<model>-reasoning`.

@@ -231,7 +231,7 @@ def judge_worker(
 
     # --- Call judge LLM --------------------------------------------------
     provider = llm_client.get_provider(judge_provider)
-    answer_text = model_resp.response["choices"][0]["message"]["content"]
+    answer_text = model_resp.final_content_text()
 
     # Narrow workaround: Hermes 4 405B produced a pathological us_hard row
     # that was literally one repeated dash character 4096 times. Grok 4.1 Fast
