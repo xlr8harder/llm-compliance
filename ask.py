@@ -581,6 +581,8 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
                 api_provider=None if anonymize else provider_name,
                 api_model=None if anonymize else api_model,
                 category=question.category,
+                request_format=getattr(api_response, "request_format", None),
+                raw_response_format=getattr(api_response, "raw_response_format", None),
                 domain=question.domain,
             )
 

@@ -50,6 +50,8 @@ class ModelResponse:
     - api_provider: Provider name (e.g., 'openai', 'openrouter')
     - api_model: Provider-specific model ID
     - raw_response: Full raw provider response
+    - request_format: Client request format used to make the request
+    - raw_response_format: Schema/shape of the stored response payload
     - category: Category of the question
     - domain: Domain of the question
     - model_requested: Model that was originally requested (may differ from model used)
@@ -62,6 +64,8 @@ class ModelResponse:
     api_provider: Optional[str] = None
     api_model: Optional[str] = None
     raw_response: Optional[Dict] = None
+    request_format: Optional[str] = None
+    raw_response_format: Optional[str] = None
     category: Optional[str] = None
     domain: Optional[str] = None
     model_requested: Optional[str] = None
