@@ -205,3 +205,9 @@
 {"canonical_name": "deepseek/deepseek-v4-pro", "providers": [{"provider_name": "openrouter", "provider_model_id": "deepseek/deepseek-v4-pro", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "deepseek/deepseek-v4-flash-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "deepseek/deepseek-v4-flash", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
 {"canonical_name": "deepseek/deepseek-v4-flash", "providers": [{"provider_name": "openrouter", "provider_model_id": "deepseek/deepseek-v4-flash", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "tencent/hy3-preview-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "tencent/hy3-preview:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "tencent/hy3-preview", "providers": [{"provider_name": "openrouter", "provider_model_id": "tencent/hy3-preview:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "inclusionai/ling-2.6-1t", "providers": [{"provider_name": "openrouter", "provider_model_id": "inclusionai/ling-2.6-1t:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "x-ai/grok-4.3", "providers": [{"provider_name": "openrouter", "provider_model_id": "x-ai/grok-4.3", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
+{"canonical_name": "ibm/granite-4.1-8b", "providers": [{"provider_name": "openrouter", "provider_model_id": "ibm-granite/granite-4.1-8b", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
+{"canonical_name": "openrouter/owl-alpha", "providers": [{"provider_name": "openrouter", "provider_model_id": "openrouter/owl-alpha", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
