@@ -263,6 +263,10 @@ def apply_reasoning_request_overrides(
     if request_format == "anthropic_messages":
         if reasoning_tokens is not None:
             raise ValueError("--reasoning-tokens is not supported with --request-format anthropic_messages; use --reasoning-effort.")
+        if reasoning_effort in {"none", "minimal"}:
+            raise ValueError(
+                "--reasoning-effort none/minimal is not supported with --request-format anthropic_messages."
+            )
         if reasoning_effort is not None and not reasoning:
             raise ValueError("Reasoning options require --reasoning. Specify --reasoning to enable thinking mode.")
         if reasoning:
@@ -389,7 +393,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Disable model reasoning (sets reasoning.enabled=false where supported)",
     )
     parser.add_argument("--reasoning-tokens", type=int, help="Reasoning max_tokens budget (requires --reasoning)")
-    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high", "max", "xhigh"], help="Reasoning effort level (requires --reasoning)")
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=["none", "minimal", "low", "medium", "high", "max", "xhigh"],
+        help="Reasoning effort level (requires --reasoning)",
+    )
 
     parser.add_argument("--system-prompt", help="System prompt to include in requests")
 

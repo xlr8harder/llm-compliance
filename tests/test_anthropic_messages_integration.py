@@ -161,3 +161,51 @@ def test_ask_overrides_reject_anthropic_messages_reasoning_tokens():
             reasoning_tokens=1024,
             reasoning_effort=None,
         )
+
+
+def test_build_probe_overrides_supports_reasoning_effort_none():
+    overrides = build_probe_overrides({}, "reasoning-effort-none")
+
+    assert overrides == {"reasoning": {"effort": "none"}}
+
+
+def test_recommendation_uses_effort_none_when_enabled_false_does_not_disable_reasoning():
+    recommendation = recommend_configuration(
+        "x-ai/grok-4.3",
+        [
+            {"probe": "default", "summary": {"reasoning_present": True}},
+            {"probe": "reasoning", "summary": {"reasoning_present": True}},
+            {"probe": "no-reasoning", "summary": {"reasoning_present": True}},
+            {"probe": "reasoning-effort-none", "summary": {"reasoning_present": False}},
+        ],
+    )
+
+    assert recommendation["mode"] == "paired_modes"
+    assert recommendation["base_run_flags"] == ["--reasoning", "--reasoning-effort", "none"]
+    assert recommendation["reasoning_canonical_name"] == "x-ai/grok-4.3-reasoning"
+
+
+def test_ask_overrides_accept_chat_reasoning_effort_none():
+    overrides, request_format = apply_reasoning_request_overrides(
+        {},
+        request_format=None,
+        reasoning=True,
+        no_reasoning=False,
+        reasoning_tokens=None,
+        reasoning_effort="none",
+    )
+
+    assert request_format is None
+    assert overrides == {"reasoning": {"enabled": True, "effort": "none"}}
+
+
+def test_ask_overrides_reject_anthropic_messages_reasoning_effort_none():
+    with pytest.raises(ValueError, match="none/minimal"):
+        apply_reasoning_request_overrides(
+            {},
+            request_format="anthropic_messages",
+            reasoning=True,
+            no_reasoning=False,
+            reasoning_tokens=None,
+            reasoning_effort="none",
+        )

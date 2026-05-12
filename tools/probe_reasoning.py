@@ -77,6 +77,8 @@ def build_probe_overrides(base_overrides: Dict[str, Any], probe: str) -> Dict[st
         request_overrides["reasoning"] = {"effort": "medium"}
     elif probe == "reasoning-effort-high":
         request_overrides["reasoning"] = {"effort": "high"}
+    elif probe == "reasoning-effort-none":
+        request_overrides["reasoning"] = {"effort": "none"}
     elif probe == "anthropic-adaptive-high":
         request_overrides["request_format"] = "anthropic_messages"
         request_overrides["thinking"] = {"type": "adaptive"}
@@ -170,6 +172,7 @@ def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) 
     reasoning_present_medium = reasoning_present(by_probe.get("reasoning-medium"))
     reasoning_present_effort_high = reasoning_present(by_probe.get("reasoning-effort-high"))
     reasoning_present_effort_medium = reasoning_present(by_probe.get("reasoning-effort-medium"))
+    reasoning_present_effort_none = reasoning_present(by_probe.get("reasoning-effort-none"))
     reasoning_present_anthropic_adaptive_high = reasoning_present(
         by_probe.get("anthropic-adaptive-high")
     )
@@ -334,6 +337,19 @@ def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) 
                 "reasoning_run_flags": reasoning_flags or ["--reasoning"],
                 "reasoning_request_overrides": reasoning_request_overrides,
                 "notes": "Default responses include reasoning traces, but explicit --no-reasoning suppresses them.",
+            }
+        )
+        return recommendation
+
+    if default_present is True and reasoning_present_effort_none is False:
+        recommendation.update(
+            {
+                "mode": "paired_modes",
+                "reasoning_canonical_name": f"{canonical_name}-reasoning",
+                "base_run_flags": ["--reasoning", "--reasoning-effort", "none"],
+                "reasoning_run_flags": reasoning_flags or ["--reasoning"],
+                "reasoning_request_overrides": reasoning_request_overrides,
+                "notes": 'Default responses include reasoning traces, but reasoning.effort="none" suppresses them.',
             }
         )
         return recommendation
@@ -634,6 +650,20 @@ def main(argv: Optional[List[str]] = None) -> None:
                 timeout_seconds=args.timeout_seconds,
             )
         )
+
+        if provider_name == "openrouter" and reasoning_present(results[-1]) is not False:
+            results.append(
+                run_probe(
+                    probe="reasoning-effort-none",
+                    prompt=args.prompt,
+                    provider_name=provider_name,
+                    api_model=api_model,
+                    base_overrides=base_overrides,
+                    system_prompt=args.system_prompt,
+                    force_subprovider=args.force_subprovider,
+                    timeout_seconds=args.timeout_seconds,
+                )
+            )
 
     recommendation = recommend_configuration(base_name, results)
     payload = {
