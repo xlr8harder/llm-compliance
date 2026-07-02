@@ -75,6 +75,94 @@ def test_model_response_marks_anthropic_messages_empty_refusal_as_error():
     assert response.final_content_text() == ""
     assert response.is_success() is False
     assert response.is_permanent_error() is True
+    assert response.is_original_moderation_error() is True
+    assert response.is_frpe_retry_candidate() is False
+
+
+def test_model_response_marks_anthropic_messages_max_tokens_as_error():
+    response = ModelResponse(
+        question_id="q1",
+        question="Question?",
+        model="anthropic/claude-opus-4.7-reasoning",
+        timestamp="2026-04-17T00:00:00+00:00",
+        response={
+            "id": "msg_123",
+            "model": "anthropic/claude-opus-4.7",
+            "content": [
+                {"type": "thinking", "thinking": "work through it"},
+                {"type": "text", "text": "partial final answer"},
+            ],
+            "stop_reason": "max_tokens",
+        },
+        request_format="anthropic_messages",
+        raw_response_format="openrouter.anthropic_messages",
+    )
+
+    assert response.final_content_text() == "partial final answer"
+    assert response.is_success() is False
+    assert response.is_permanent_error() is True
+    assert response.is_original_moderation_error() is False
+    assert response.is_frpe_retry_candidate() is True
+
+
+def test_model_response_marks_chat_content_filter_refusal_as_nonretryable_moderation():
+    response = ModelResponse(
+        question_id="q1",
+        question="Question?",
+        model="anthropic/claude-sonnet-5",
+        timestamp="2026-04-17T00:00:00+00:00",
+        response={
+            "choices": [
+                {
+                    "finish_reason": "content_filter",
+                    "native_finish_reason": "refusal",
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "refusal": None,
+                    },
+                }
+            ]
+        },
+        request_format="chat_completions",
+        raw_response_format="openrouter.chat_completions",
+    )
+
+    assert response.final_content_text() == ""
+    assert response.original_moderation_reason() == "content_filter"
+    assert response.is_success() is False
+    assert response.is_permanent_error() is True
+    assert response.is_original_moderation_error() is True
+    assert response.is_frpe_retry_candidate() is False
+
+
+def test_model_response_marks_native_refusal_with_partial_text_as_moderation():
+    response = ModelResponse(
+        question_id="q1",
+        question="Question?",
+        model="anthropic/claude-opus-4.7",
+        timestamp="2026-04-17T00:00:00+00:00",
+        response={
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "native_finish_reason": "refusal",
+                    "message": {
+                        "role": "assistant",
+                        "content": "Partial text returned before the provider classifier stopped it.",
+                    },
+                }
+            ]
+        },
+        request_format="chat_completions",
+        raw_response_format="openrouter.chat_completions",
+    )
+
+    assert response.final_content_text().startswith("Partial text")
+    assert response.original_moderation_reason() == "refusal"
+    assert response.is_success() is False
+    assert response.is_original_moderation_error() is True
+    assert response.is_frpe_retry_candidate() is False
 
 
 def test_anthropic_adaptive_probe_uses_messages_request_format():

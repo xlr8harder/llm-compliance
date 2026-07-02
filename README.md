@@ -20,7 +20,7 @@ Reproduction:
 ```bash
 export OPENROUTER_API_KEY=...
 for model in `cat models.txt` ; do echo $model;  for question in `ls questions/*.jsonl | grep -v us_hard` ; do python ask.py $model $question & done ; done
-python judge_compliance.py openai/gpt-4o-2024-11-20 responses/*.jsonl
+PYTHONPATH=. uv run python judge_compliance.py responses/*.jsonl --max-errors 20
 
 cat analysis/compliance_china_criticism_deepseek_deepseek-chat.jsonl | jq 'select(.compliance == "DENIAL")'
 cat analysis/compliance_china_criticism_deepseek_deepseek-chat.jsonl | jq 'select(.compliance == "EVASIVE")'
@@ -46,13 +46,59 @@ python report.py --sort-by compliance -o report/${PROVIDER}_multilingual_china_c
 
 ## SpeechMap.ai model update
 ```bash
-python ask.py -w 20 mistralai/mistral-small-3.1-24b-instruct questions/us_hard.jsonl
-python judge_compliance.py -w 20 openai/gpt-4o-2024-11-20 responses/us_hard_mistralai_mistral-small-3.1-24b-instruct.jsonl
+PYTHONPATH=. uv run python ask.py --workers 20 mistralai/mistral-small-3.1-24b-instruct questions/us_hard.jsonl
+PYTHONPATH=. uv run python judge_compliance.py responses/us_hard_mistralai_mistral-small-3.1-24b-instruct.jsonl --max-errors 20
 ```
+
+## Judging rate limits and retry policy
+
+The default hosted judge is Grok 4.1 Fast non-reasoning
+(`xai/grok-4.1-fast-non-reasoning`) through `google_agent_platform`, which is
+sensitive to short burst limits. The observed usable quota is a rolling
+45-request/minute admission cap with enough workers to hide provider latency.
+These are the script defaults. For explicit copy-paste runs, use:
+
+```bash
+PYTHONPATH=. uv run python judge_compliance.py responses/us_hard_MODEL.jsonl \
+  --workers 64 \
+  --request-min-interval 0.8 \
+  --request-max-per-period 45 \
+  --request-period 60 \
+  --judge-max-retries 2 \
+  --quota-cooldown 20 \
+  --max-errors 20
+```
+
+Do not run the default judge at `--workers 30` with no request throttle. In the
+Sonnet 5 run, an unthrottled burst completed roughly 72 rows in 9 seconds and
+then hit `429 RESOURCE_EXHAUSTED`; a 60-request/minute probe also hit quota near
+the one-minute boundary. The 45-request/minute rolling cap completed cleanly.
+The old one-worker/two-second setting underuses the observed quota and should
+not be the normal run mode.
+
+For multiple files, use the queue wrapper so per-file output locks and throttles
+stay explicit:
+
+```bash
+PYTHONPATH=. uv run python tools/judge_compliance_queue.py responses/us_hard_*.jsonl \
+  --jobs 1 \
+  --workers 64 \
+  --request-min-interval 0.8 \
+  --request-max-per-period 45 \
+  --request-period 60 \
+  --judge-max-retries 2 \
+  --quota-cooldown 20 \
+  --max-errors 20
+```
+
+Original-model moderation/classifier stops are recorded as
+`ERROR_ORIGINAL_MODERATION`; judge-model content-filter stops are recorded as
+`ERROR_JUDGE_CONTENT_FILTER`. These are terminal rows. Do not rerun judging just
+to try to get past the classifier. `ask.py --frpe` preserves original moderation
+rows and is still appropriate for retrying original-model response failures that
+are not identified as moderation.
 
 ## Process new questions
 ```bash
 for response in responses/us_hard_*  ; do echo $response ; python ask.py -w 15 --detect $response  ; done
 ```
-
-

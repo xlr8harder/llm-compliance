@@ -10,7 +10,7 @@ Two modes
 
 Features
 --------
-* `--frpe`  – "Force-Retry Permanent Errors" cleanup.
+* `--frpe`  – retry non-moderation permanent errors; keep moderation rows.
 * Optional coherency gate (OpenRouter sub-provider blacklist).
 * Provider calls go through llm_client.retry_request.
 * ModelCatalog is lazily extended when a full mapping is supplied on the CLI.
@@ -175,17 +175,23 @@ def clean_frpe(responses_path: Path) -> List[ModelResponse]:
     removed_empty = 0
     removed_error = 0
     removed_duplicate = 0
+    kept_moderation = 0
     seen_question_ids: set[str] = set()
 
     for row in existing_rows:
         if _is_empty_response(row):
             removed_empty += 1
             continue
-        if not row.is_success():
-            removed_error += 1
-            continue
         if row.question_id in seen_question_ids:
             removed_duplicate += 1
+            continue
+        if row.is_original_moderation_error():
+            seen_question_ids.add(row.question_id)
+            kept_rows.append(row)
+            kept_moderation += 1
+            continue
+        if row.is_frpe_retry_candidate():
+            removed_error += 1
             continue
         seen_question_ids.add(row.question_id)
         kept_rows.append(row)
@@ -193,11 +199,15 @@ def clean_frpe(responses_path: Path) -> List[ModelResponse]:
     removed_total = removed_empty + removed_error + removed_duplicate
     if removed_total:
         LOGGER.info(
-            "FRPE: removed %d rows (errors=%d, empty_response=%d, duplicate_question_id=%d)",
+            (
+                "FRPE: removed %d rows (retryable_errors=%d, empty_response=%d, "
+                "duplicate_question_id=%d, kept_original_moderation=%d)"
+            ),
             removed_total,
             removed_error,
             removed_empty,
             removed_duplicate,
+            kept_moderation,
         )
     JSONLHandler.save_jsonl(kept_rows, responses_path, append=False)
     return kept_rows
@@ -357,7 +367,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--request-format",
         help="llm_client request format, e.g. chat_completions or anthropic_messages",
     )
-    parser.add_argument("--frpe", action="store_true", help="clean permanent errors before retrying")
+    parser.add_argument(
+        "--frpe",
+        action="store_true",
+        help="clean non-moderation permanent errors before retrying",
+    )
     parser.add_argument(
         "--anonymize",
         action="store_true",

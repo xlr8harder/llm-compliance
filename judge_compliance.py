@@ -7,7 +7,10 @@ Streaming version
   progress survives crashes or CTRL‑C.
 * Maintains *one* analysis row per `question_id` across runs (newer timestamps
   replace older rows).
-* `--max-errors` aborts the run after N consecutive **permanent** judge errors.
+* Stores judge-side classifier failures as terminal analysis rows instead of
+  re-trying them on later runs.
+* `--max-errors` aborts the run after N consecutive judge transport/provider
+  errors.
 * `--force-restart` discards any previous analysis file for the given
   responses file.
 * Uses the original judging prompt verbatim.
@@ -18,10 +21,12 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import random
 import re
 import sys
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from collections import defaultdict, deque
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,7 +44,6 @@ from compliance.data import JSONLHandler, ModelResponse, ComplianceAnalysis
 # llm_client layer
 # ---------------------------------------------------------------------------
 import llm_client
-from llm_client.retry import retry_request
 
 LOGGER = logging.getLogger("judge")
 logging.basicConfig(
@@ -48,9 +52,75 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-DEFAULT_JUDGE_MODEL = "x-ai/grok-4.1-fast"
-DEFAULT_JUDGE_PROVIDER = "openrouter"
+
+class RequestThrottle:
+    """Shared throttle for provider request starts."""
+
+    def __init__(
+        self,
+        min_interval_seconds: float,
+        max_requests_per_period: Optional[int] = None,
+        period_seconds: float = 60.0,
+    ) -> None:
+        self.min_interval_seconds = max(0.0, min_interval_seconds)
+        self.max_requests_per_period = (
+            max_requests_per_period if max_requests_per_period and max_requests_per_period > 0 else None
+        )
+        self.period_seconds = max(0.0, period_seconds)
+        self._lock = Lock()
+        self._next_request_at = 0.0
+        self._request_starts: deque[float] = deque()
+
+    def wait(self) -> None:
+        if self.min_interval_seconds <= 0 and self.max_requests_per_period is None:
+            return
+        with self._lock:
+            while True:
+                now = time.monotonic()
+                sleep_until = self._next_request_at if self.min_interval_seconds > 0 else now
+
+                if self.max_requests_per_period is not None and self.period_seconds > 0:
+                    cutoff = now - self.period_seconds
+                    while self._request_starts and self._request_starts[0] <= cutoff:
+                        self._request_starts.popleft()
+                    if len(self._request_starts) >= self.max_requests_per_period:
+                        sleep_until = max(sleep_until, self._request_starts[0] + self.period_seconds)
+
+                sleep_for = sleep_until - now
+                if sleep_for > 0:
+                    time.sleep(sleep_for)
+                    continue
+
+                if self.max_requests_per_period is not None:
+                    self._request_starts.append(now)
+                self._next_request_at = now + self.min_interval_seconds
+                return
+
+    def cooldown(self, seconds: float) -> None:
+        """Delay future request starts across all workers."""
+        if seconds <= 0:
+            return
+        with self._lock:
+            self._next_request_at = max(self._next_request_at, time.monotonic() + seconds)
+
+DEFAULT_JUDGE_MODEL = "xai/grok-4.1-fast-non-reasoning"
+DEFAULT_JUDGE_PROVIDER = "google_agent_platform"
+DEFAULT_JUDGE_WORKERS = 64
+DEFAULT_REQUEST_MIN_INTERVAL = 0.8
+DEFAULT_REQUEST_MAX_PER_PERIOD = 45
+DEFAULT_REQUEST_PERIOD = 60.0
 DEFAULT_JUDGE_REASONING_ENABLED = False
+DEFAULT_JUDGE_MAX_RETRIES = 2
+DEFAULT_QUOTA_COOLDOWN = 20.0
+ERROR_ORIGINAL_RESPONSE = "ERROR_ORIGINAL_RESPONSE"
+ERROR_ORIGINAL_MODERATION = "ERROR_ORIGINAL_MODERATION"
+LEGACY_JUDGE_REASONING_DEFAULTS = {
+    ("openrouter", "x-ai/grok-4.1-fast"): False,
+}
+QUOTA_ERROR_RE = re.compile(
+    r"(?:\b429\b|resource[_ -]?exhausted|quota|rate[_ -]?limit)",
+    re.IGNORECASE,
+)
 
 ###############################################################################
 # Prompt helpers
@@ -157,9 +227,110 @@ def load_jsonl_safe(path: Path, cls):
     return JSONLHandler.load_jsonl(path, cls)
 
 
-def is_judge_side_error(compliance_code: Optional[str]) -> bool:
-    """Return True for stored judge-side failure markers."""
-    return isinstance(compliance_code, str) and compliance_code.startswith("ERROR_JUDGE_")
+def collect_error_strings(value: object) -> list[str]:
+    """Collect strings from nested provider error payloads."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        strings: list[str] = []
+        for nested in value.values():
+            strings.extend(collect_error_strings(nested))
+        return strings
+    if isinstance(value, list):
+        strings: list[str] = []
+        for nested in value:
+            strings.extend(collect_error_strings(nested))
+        return strings
+    if value is None:
+        return []
+    return [str(value)]
+
+
+def is_quota_error(error_info: object) -> bool:
+    """Return True for provider errors that look like request/token quota exhaustion."""
+    if isinstance(error_info, dict):
+        status_code = error_info.get("status_code")
+        if status_code == 429 or str(status_code) == "429":
+            return True
+    return any(QUOTA_ERROR_RE.search(text) for text in collect_error_strings(error_info))
+
+
+def make_provider_request(
+    provider,
+    messages: list[dict[str, str]],
+    model_id: str,
+    **options,
+):
+    """Call the provider once using the same dispatch as llm_client.retry."""
+    if hasattr(provider, "make_request"):
+        return provider.make_request(
+            messages=messages,
+            model_id=model_id,
+            context=None,
+            request_format="chat_completions",
+            **options,
+        )
+
+    response = provider.make_chat_completion_request(
+        messages=messages,
+        model_id=model_id,
+        context=None,
+        **options,
+    )
+    if getattr(response, "request_format", None) is None:
+        response.request_format = "chat_completions"
+    return response
+
+
+def make_judge_request(
+    provider,
+    messages: list[dict[str, str]],
+    model_id: str,
+    request_throttle: Optional[RequestThrottle],
+    max_retries: int,
+    quota_cooldown: float,
+    skip_first_wait: bool = False,
+    initial_delay: float = 1.0,
+    backoff_factor: float = 2.0,
+    jitter: float = 0.1,
+    **options,
+):
+    """Call the judge with shared admission control on every retry attempt."""
+    attempt = 0
+    last_response = None
+    while attempt <= max_retries:
+        if request_throttle is not None and not (attempt == 0 and skip_first_wait):
+            request_throttle.wait()
+
+        response = make_provider_request(
+            provider=provider,
+            messages=messages,
+            model_id=model_id,
+            **options,
+        )
+        if response.success or not response.is_retryable:
+            return response
+
+        last_response = response
+        attempt += 1
+        if attempt > max_retries:
+            break
+
+        delay = min(initial_delay * (backoff_factor ** (attempt - 1)), 60.0)
+        delay *= 1 + random.uniform(-jitter, jitter)
+        if is_quota_error(response.error_info):
+            delay = max(delay, quota_cooldown)
+            if request_throttle is not None:
+                request_throttle.cooldown(delay)
+                continue
+        time.sleep(delay)
+
+    if last_response is not None:
+        if isinstance(last_response.error_info, dict):
+            last_response.error_info["max_retries_exceeded"] = True
+        if not is_quota_error(last_response.error_info):
+            last_response.is_retryable = False
+    return last_response
 
 
 def analysis_matches_current_response_state(
@@ -167,9 +338,11 @@ def analysis_matches_current_response_state(
     analysis: ComplianceAnalysis,
 ) -> bool:
     """Return True when the analysis is compatible with the current response state."""
+    if resp.is_original_moderation_error():
+        return analysis.compliance == ERROR_ORIGINAL_MODERATION
     if resp.is_success():
-        return analysis.compliance != "ERROR_ORIGINAL_RESPONSE"
-    return analysis.compliance == "ERROR_ORIGINAL_RESPONSE"
+        return analysis.compliance not in {ERROR_ORIGINAL_RESPONSE, ERROR_ORIGINAL_MODERATION}
+    return analysis.compliance == ERROR_ORIGINAL_RESPONSE
 
 
 @contextmanager
@@ -200,6 +373,10 @@ def judge_worker(
     judge_model: str,
     judge_provider: str,
     prompt_template: Optional[str] = None,
+    request_throttle: Optional[RequestThrottle] = None,
+    judge_max_retries: int = DEFAULT_JUDGE_MAX_RETRIES,
+    quota_cooldown: float = DEFAULT_QUOTA_COOLDOWN,
+    initial_request_prethrottled: bool = False,
     **request_overrides,
 ) -> ComplianceAnalysis | RuntimeError:
     """Compute ComplianceAnalysis for one response.
@@ -211,6 +388,27 @@ def judge_worker(
     A transient error that was retried and still failed comes back as
     `RuntimeError("TRANSIENT_JUDGE_FAILURE")` so the caller can decide.
     """
+    if model_resp.is_original_moderation_error():
+        moderation_reason = model_resp.original_moderation_reason() or "moderation"
+        return ComplianceAnalysis(
+            question_id=model_resp.question_id,
+            question=model_resp.question,
+            model=model_resp.model,
+            response=model_resp.response,
+            judge_model=judge_model,
+            judge_api_provider=judge_provider,
+            compliance=ERROR_ORIGINAL_MODERATION,
+            judge_analysis=(
+                "original response stopped by provider moderation/classifier "
+                f"({moderation_reason})"
+            ),
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            original_api_provider=model_resp.api_provider,
+            api_model=model_resp.api_model,
+            category=model_resp.category or "undefined",
+            domain=model_resp.domain,
+        )
+
     # If original answer was already a permanent error, short‑circuit.
     if not model_resp.is_success():
         return ComplianceAnalysis(
@@ -220,7 +418,7 @@ def judge_worker(
             response=model_resp.response,
             judge_model=judge_model,
             judge_api_provider=judge_provider,
-            compliance="ERROR_ORIGINAL_RESPONSE",
+            compliance=ERROR_ORIGINAL_RESPONSE,
             judge_analysis="original response marked as permanent error",
             timestamp=datetime.now(timezone.utc).isoformat(),
             original_api_provider=model_resp.api_provider,
@@ -264,21 +462,47 @@ def judge_worker(
     else:
         prompt = create_judge_prompt_from_template(prompt_template, model_resp.question, answer_text)
 
-    judge_resp = retry_request(
+    if request_throttle is not None:
+        request_throttle.wait()
+
+    judge_resp = make_judge_request(
         provider=provider,
         messages=[{"role": "user", "content": prompt}],
         model_id=judge_model,
-        max_retries=3,
+        request_throttle=request_throttle,
+        max_retries=judge_max_retries,
+        quota_cooldown=quota_cooldown,
+        skip_first_wait=initial_request_prethrottled,
         timeout=90,
         **request_overrides,
     )
 
     # Permanent failure → signal up‑stack.
     if not judge_resp.success and not judge_resp.is_retryable:
+        error_info = judge_resp.error_info or {}
+        if isinstance(error_info, dict) and error_info.get("type") == "content_filter":
+            return ComplianceAnalysis(
+                question_id=model_resp.question_id,
+                question=model_resp.question,
+                model=model_resp.model,
+                response=model_resp.response,
+                judge_model=judge_model,
+                judge_api_provider=judge_provider,
+                compliance="ERROR_JUDGE_CONTENT_FILTER",
+                judge_analysis=str(error_info.get("message") or "judge response stopped due to content filter"),
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                original_api_provider=model_resp.api_provider,
+                api_model=model_resp.api_model,
+                raw_judge_response=str(error_info),
+                category=model_resp.category or "undefined",
+                domain=model_resp.domain,
+            )
         return RuntimeError(judge_resp.error_info or "permanent judge error")
 
     # Transient (still retryable) failure → special marker.
     if not judge_resp.success:
+        if is_quota_error(judge_resp.error_info):
+            return RuntimeError("TRANSIENT_JUDGE_QUOTA")
         return RuntimeError("TRANSIENT_JUDGE_FAILURE")
 
     raw_content = judge_resp.standardized_response.get("content", "")
@@ -307,7 +531,12 @@ def judge_worker(
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Judge compliance of LLM responses (streaming write).")
     parser.add_argument("response_files", nargs="+", type=Path, help="ModelResponse JSONL files to analyse")
-    parser.add_argument("--workers", type=int, default=30)
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=DEFAULT_JUDGE_WORKERS,
+        help=f"judge worker threads for in-flight provider calls (default: {DEFAULT_JUDGE_WORKERS})",
+    )
     parser.add_argument("--force-restart", action="store_true", help="discard existing analysis file and start fresh")
     parser.add_argument("--max-errors", type=int, default=5, help="abort after N consecutive permanent judge errors")
     parser.add_argument("--no-summary", action="store_true", help="skip category summaries at the end")
@@ -331,12 +560,53 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--reasoning-effort",
-        choices=["low", "medium", "high"],
+        choices=["minimal", "low", "medium", "high"],
         help="reasoning effort level (requires --reasoning)",
     )
     parser.add_argument(
         "--force-subprovider",
         help="OpenRouter only: restrict judge requests to a single subprovider (uses OpenRouter 'only').",
+    )
+    parser.add_argument(
+        "--request-min-interval",
+        type=float,
+        default=DEFAULT_REQUEST_MIN_INTERVAL,
+        help=(
+            "minimum seconds between judge request starts across workers "
+            f"(default: {DEFAULT_REQUEST_MIN_INTERVAL})"
+        ),
+    )
+    parser.add_argument(
+        "--request-max-per-period",
+        type=int,
+        default=DEFAULT_REQUEST_MAX_PER_PERIOD,
+        help=(
+            "maximum judge request starts allowed during each rolling request period "
+            f"(default: {DEFAULT_REQUEST_MAX_PER_PERIOD})"
+        ),
+    )
+    parser.add_argument(
+        "--request-period",
+        type=float,
+        default=DEFAULT_REQUEST_PERIOD,
+        help=f"rolling quota period in seconds for --request-max-per-period (default: {DEFAULT_REQUEST_PERIOD:g})",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="judge at most this many currently pending rows, useful for quota probes",
+    )
+    parser.add_argument(
+        "--judge-max-retries",
+        type=int,
+        default=DEFAULT_JUDGE_MAX_RETRIES,
+        help=f"max retry attempts per judge row; every retry is rate-limited (default: {DEFAULT_JUDGE_MAX_RETRIES})",
+    )
+    parser.add_argument(
+        "--quota-cooldown",
+        type=float,
+        default=DEFAULT_QUOTA_COOLDOWN,
+        help=f"shared cooldown seconds after a quota/rate-limit error (default: {DEFAULT_QUOTA_COOLDOWN})",
     )
     parser.add_argument("--output-dir", type=Path, default=Path("analysis"), help="directory for ComplianceAnalysis JSONL output")
     parser.add_argument(
@@ -345,6 +615,43 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="suffix appended to compliance_<responses_stem> before .jsonl",
     )
     return parser
+
+
+def build_judge_request_overrides(args: argparse.Namespace) -> Dict[str, object]:
+    """Build provider-specific judge request overrides from CLI args."""
+    reasoning_cfg: Dict[str, object] = {}
+    if args.reasoning:
+        reasoning_cfg["enabled"] = True
+    elif getattr(args, "no_reasoning", False):
+        reasoning_cfg["enabled"] = False
+    else:
+        legacy_reasoning_default = LEGACY_JUDGE_REASONING_DEFAULTS.get(
+            (args.judge_provider, args.judge_model)
+        )
+        if legacy_reasoning_default is not None:
+            reasoning_cfg["enabled"] = legacy_reasoning_default
+
+    if args.reasoning_effort is not None and not reasoning_cfg.get("enabled"):
+        raise ValueError(
+            "Reasoning options require --reasoning. Specify --reasoning to enable thinking mode."
+        )
+
+    request_overrides: Dict[str, object] = {}
+    if args.judge_provider == "google_agent_platform":
+        if args.reasoning_effort is not None:
+            request_overrides["reasoning_effort"] = args.reasoning_effort
+    else:
+        if reasoning_cfg.get("enabled") and args.reasoning_effort is not None:
+            reasoning_cfg["effort"] = args.reasoning_effort
+        if "enabled" in reasoning_cfg:
+            request_overrides["reasoning"] = reasoning_cfg
+
+    if args.force_subprovider:
+        if args.judge_provider != "openrouter":
+            raise ValueError("--force-subprovider is only supported with --judge-provider openrouter")
+        request_overrides["only"] = [args.force_subprovider]
+
+    return request_overrides
 
 ###############################################################################
 # Core processing per responses file
@@ -359,6 +666,12 @@ def process_file(
     judge_provider: str,
     prompt_template: Optional[str],
     request_overrides: Dict[str, object],
+    request_min_interval: float,
+    request_max_per_period: Optional[int],
+    request_period: float,
+    limit: Optional[int],
+    judge_max_retries: int,
+    quota_cooldown: float,
     output_dir: Path,
     output_stem_suffix: str,
 ) -> List[ComplianceAnalysis]:
@@ -383,16 +696,12 @@ def process_file(
         responses_map = {resp.question_id: resp for resp in model_responses}
 
         # Clean up analyses map: keep only analyses that still correspond to an
-        # existing response row, are newer than that response, and are not
-        # judge-side errors or stale original-response judgments.
+        # existing response row, are newer than that response, and match the
+        # current original-response state. Stored judge-side classifier failures
+        # are preserved so resume runs do not race the judge moderation layer.
         cleaned_analyses = {}
         for qid, analysis in analyses_map.items():
             current_resp = responses_map.get(qid)
-            compliance_code = getattr(analysis, "compliance", "") or ""
-            if is_judge_side_error(compliance_code):
-                # Drop judge-side errors from the kept set so a retry rewrites the
-                # file without leaving stale error rows alongside the new result.
-                continue
             if current_resp is None:
                 # Response row no longer exists (for example after FRPE cleanup).
                 # Drop the stale analysis row rather than preserving orphaned output.
@@ -419,6 +728,8 @@ def process_file(
             existing = analyses_map.get(resp.question_id)
             if existing is None:
                 to_judge.append(resp)
+        if limit is not None:
+            to_judge = to_judge[:limit]
 
         LOGGER.info(
             "%s → pending=%d / total=%d (output %s)",
@@ -431,48 +742,91 @@ def process_file(
         # Process pending judgments if any
         if to_judge:
             lock = Lock()  # guard streaming writes
+            request_throttle = (
+                RequestThrottle(
+                    request_min_interval,
+                    max_requests_per_period=request_max_per_period,
+                    period_seconds=request_period,
+                )
+                if request_min_interval > 0 or request_max_per_period is not None
+                else None
+            )
             consecutive_errors = 0
 
             with ThreadPoolExecutor(max_workers=workers) as pool, tqdm(total=len(to_judge)) as bar:
-                future_map = {
-                    pool.submit(
+                next_index = 0
+                future_map = {}
+
+                def submit_one() -> bool:
+                    nonlocal next_index
+                    if next_index >= len(to_judge):
+                        return False
+                    mr = to_judge[next_index]
+                    next_index += 1
+                    if request_throttle is not None:
+                        request_throttle.wait()
+                    future = pool.submit(
                         judge_worker,
                         mr,
                         judge_model,
                         judge_provider,
                         prompt_template=prompt_template,
+                        request_throttle=request_throttle,
+                        judge_max_retries=judge_max_retries,
+                        quota_cooldown=quota_cooldown,
+                        initial_request_prethrottled=request_throttle is not None,
                         **request_overrides,
-                    ): mr.question_id
-                    for mr in to_judge
-                }
-                for future in as_completed(future_map):
-                    bar.update(1)
-                    qid = future_map[future]
-                    try:
-                        result = future.result()
-                    except Exception as exc:  # noqa: BLE001
-                        LOGGER.exception("Worker crashed for %s: %s", qid, exc)
-                        consecutive_errors += 1
-                    else:
-                        if isinstance(result, RuntimeError):
-                            errmsg = str(result)
-                            if errmsg == "TRANSIENT_JUDGE_FAILURE":
-                                LOGGER.warning("Transient judge failure on %s (will retry next run)", qid)
-                                # Do *not* bump permanent‑error counter
-                            else:
-                                LOGGER.error("Permanent judge error on %s: %s", qid, errmsg)
-                                consecutive_errors += 1
-                        else:
-                            # success or ERROR_ORIGINAL_RESPONSE – stream to disk
-                            with lock:
-                                JSONLHandler.save_jsonl([result], analysis_path, append=True)
-                            analyses_map[qid] = result
-                            consecutive_errors = 0
+                    )
+                    future_map[future] = mr.question_id
+                    return True
 
-                    if consecutive_errors >= max_errors:
-                        raise RuntimeError(
-                            f"Aborting – reached {consecutive_errors} consecutive permanent judge errors"
-                        )
+                def process_done_futures(done_futures) -> None:
+                    nonlocal consecutive_errors
+                    for future in done_futures:
+                        bar.update(1)
+                        qid = future_map.pop(future)
+                        try:
+                            result = future.result()
+                        except Exception as exc:  # noqa: BLE001
+                            LOGGER.exception("Worker crashed for %s: %s", qid, exc)
+                            consecutive_errors += 1
+                        else:
+                            if isinstance(result, RuntimeError):
+                                errmsg = str(result)
+                                if errmsg == "TRANSIENT_JUDGE_QUOTA":
+                                    LOGGER.warning("Quota judge failure on %s (will retry next run)", qid)
+                                    # Do *not* bump permanent-error counter.
+                                elif errmsg == "TRANSIENT_JUDGE_FAILURE":
+                                    LOGGER.warning("Transient judge failure on %s (will retry next run)", qid)
+                                    # Do *not* bump permanent-error counter.
+                                else:
+                                    LOGGER.error("Permanent judge error on %s: %s", qid, errmsg)
+                                    consecutive_errors += 1
+                            else:
+                                with lock:
+                                    JSONLHandler.save_jsonl([result], analysis_path, append=True)
+                                analyses_map[qid] = result
+                                consecutive_errors = 0
+
+                        if consecutive_errors >= max_errors:
+                            raise RuntimeError(
+                                f"Aborting – reached {consecutive_errors} consecutive permanent judge errors"
+                            )
+
+                while next_index < len(to_judge) and len(future_map) < workers:
+                    submit_one()
+                    done_now = [future for future in future_map if future.done()]
+                    if done_now:
+                        process_done_futures(done_now)
+
+                while future_map:
+                    done, _ = wait(future_map, return_when=FIRST_COMPLETED)
+                    process_done_futures(done)
+                    while next_index < len(to_judge) and len(future_map) < workers:
+                        submit_one()
+                        done_now = [future for future in future_map if future.done()]
+                        if done_now:
+                            process_done_futures(done_now)
 
         LOGGER.info(
             "File %s done – total analyses now %d", analysis_path.name, len(analyses_map)
@@ -487,36 +841,36 @@ def process_file(
 
 def main(argv: Optional[List[str]] | None = None) -> None:  # noqa: D401
     args = build_arg_parser().parse_args(argv)
+    if args.workers < 1:
+        LOGGER.error("--workers must be >= 1")
+        sys.exit(2)
+    if args.request_min_interval < 0:
+        LOGGER.error("--request-min-interval must be >= 0")
+        sys.exit(2)
+    if args.request_max_per_period is not None and args.request_max_per_period < 1:
+        LOGGER.error("--request-max-per-period must be >= 1")
+        sys.exit(2)
+    if args.request_period <= 0:
+        LOGGER.error("--request-period must be > 0")
+        sys.exit(2)
+    if args.limit is not None and args.limit < 1:
+        LOGGER.error("--limit must be >= 1")
+        sys.exit(2)
+    if args.judge_max_retries < 0:
+        LOGGER.error("--judge-max-retries must be >= 0")
+        sys.exit(2)
+    if args.quota_cooldown < 0:
+        LOGGER.error("--quota-cooldown must be >= 0")
+        sys.exit(2)
     prompt_template: Optional[str] = None
     if args.prompt_template_file is not None:
         prompt_template = args.prompt_template_file.read_text(encoding="utf-8")
 
-    reasoning_cfg: Dict[str, object] = {}
-    if args.reasoning:
-        reasoning_cfg["enabled"] = True
-    elif getattr(args, "no_reasoning", False):
-        reasoning_cfg["enabled"] = False
-    elif (
-        args.judge_model == DEFAULT_JUDGE_MODEL
-        and args.judge_provider == DEFAULT_JUDGE_PROVIDER
-    ):
-        # The migrated default judge is the Grok 4.1 Fast non-reasoning setup.
-        reasoning_cfg["enabled"] = DEFAULT_JUDGE_REASONING_ENABLED
-
-    if args.reasoning_effort is not None and not reasoning_cfg.get("enabled"):
-        LOGGER.error("Reasoning options require --reasoning. Specify --reasoning to enable thinking mode.")
+    try:
+        request_overrides = build_judge_request_overrides(args)
+    except ValueError as exc:
+        LOGGER.error(str(exc))
         sys.exit(2)
-    if reasoning_cfg.get("enabled") and args.reasoning_effort is not None:
-        reasoning_cfg["effort"] = args.reasoning_effort
-
-    request_overrides: Dict[str, object] = {}
-    if "enabled" in reasoning_cfg:
-        request_overrides["reasoning"] = reasoning_cfg
-    if args.force_subprovider:
-        if args.judge_provider != "openrouter":
-            LOGGER.error("--force-subprovider is only supported with --judge-provider openrouter")
-            sys.exit(2)
-        request_overrides["only"] = [args.force_subprovider]
 
     # Collect all analyses by category
     all_analyses_by_category: Dict[str, List[ComplianceAnalysis]] = defaultdict(list)
@@ -533,6 +887,12 @@ def main(argv: Optional[List[str]] | None = None) -> None:  # noqa: D401
                 judge_provider=args.judge_provider,
                 prompt_template=prompt_template,
                 request_overrides=request_overrides,
+                request_min_interval=args.request_min_interval,
+                request_max_per_period=args.request_max_per_period,
+                request_period=args.request_period,
+                limit=args.limit,
+                judge_max_retries=args.judge_max_retries,
+                quota_cooldown=args.quota_cooldown,
                 output_dir=args.output_dir,
                 output_stem_suffix=args.output_stem_suffix,
             )

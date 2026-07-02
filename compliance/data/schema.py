@@ -2,7 +2,45 @@
 Data classes for compliance evaluation schema.
 """
 from dataclasses import dataclass, field, asdict
+import re
 from typing import Dict, List, Optional, Any, Union
+
+
+MODERATION_ERROR_TEXT_RE = re.compile(
+    r"("
+    r"usage policy|"
+    r"requires moderation|"
+    r"input was flagged|"
+    r"prompt was flagged|"
+    r"output data may contain inappropriate content|"
+    r"input data may contain inappropriate content|"
+    r"data_inspection_failed|"
+    r"prohibited_content|"
+    r"content[_ -]?filter|"
+    r"safety policy|"
+    r"policy violation|"
+    r"blocked by (?:safety|moderation)|"
+    r"\bmoderation\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _collect_strings(value: Any) -> list[str]:
+    """Collect strings from nested API error payloads."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        strings: list[str] = []
+        for nested in value.values():
+            strings.extend(_collect_strings(nested))
+        return strings
+    if isinstance(value, list):
+        strings: list[str] = []
+        for nested in value:
+            strings.extend(_collect_strings(nested))
+        return strings
+    return []
 
 
 @dataclass
@@ -88,6 +126,16 @@ class ModelResponse:
                 return stop_reason
         return None
 
+    def _native_finish_reason(self) -> str | None:
+        """Return provider-native finish/stop reason when OpenRouter exposes one."""
+        try:
+            native_finish_reason = self.response["choices"][0].get("native_finish_reason")
+            if isinstance(native_finish_reason, str):
+                return native_finish_reason
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
     def _message_content(self) -> Any:
         """Return assistant content from Chat Completions shape when present."""
         try:
@@ -149,10 +197,50 @@ class ModelResponse:
             pass
         return False
 
+    def original_moderation_reason(self) -> str | None:
+        """Return the original-provider moderation/refusal stop reason, if any."""
+        finish_reason = self._finish_reason()
+        native_finish_reason = self._native_finish_reason()
+
+        if finish_reason in {"content_filter", "refusal"}:
+            return finish_reason
+
+        if native_finish_reason in {"content_filter", "refusal"}:
+            return native_finish_reason
+
+        if isinstance(self.response, dict):
+            top_error = self.response.get("error")
+            if isinstance(top_error, dict) and top_error.get("type") == "content_filter":
+                return "content_filter"
+            if any(MODERATION_ERROR_TEXT_RE.search(text) for text in _collect_strings(top_error)):
+                return "moderation_error_text"
+            try:
+                choice_error = self.response["choices"][0].get("error")
+                if isinstance(choice_error, dict) and choice_error.get("type") == "content_filter":
+                    return "content_filter"
+                if any(MODERATION_ERROR_TEXT_RE.search(text) for text in _collect_strings(choice_error)):
+                    return "moderation_error_text"
+            except Exception:  # noqa: BLE001
+                pass
+
+        return None
+
+    def is_original_moderation_error(self) -> bool:
+        """True when the original model was stopped by a moderation/classifier gate."""
+        return self.original_moderation_reason() is not None
+
+    def is_frpe_retry_candidate(self) -> bool:
+        """True when FRPE cleanup should remove the row for retry."""
+        return self.is_permanent_error() and not self.is_original_moderation_error()
+
     def is_permanent_error(self) -> bool:
         if self._contains_api_error():
             return True
+        if self.is_original_moderation_error():
+            return True
         if self._finish_reason() == "error":
+            return True
+        if self._finish_reason() == "max_tokens":
             return True
         if self._has_missing_final_content():
             return True

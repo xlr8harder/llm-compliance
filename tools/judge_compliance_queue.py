@@ -2,8 +2,9 @@
 """Safely queue `judge_compliance.py` across multiple response files.
 
 This runs at most N response files concurrently, with one `judge_compliance.py`
-child process per file. That preserves the existing per-file judging logic while
-preventing accidental overlap on the same analysis output.
+child process per file. Defaults are calibrated for the default hosted judge:
+one file at a time, concurrent in-flight requests, and a 45-request/minute
+rolling admission cap per child process.
 """
 
 from __future__ import annotations
@@ -24,7 +25,13 @@ if str(REPO_ROOT) not in sys.path:
 from judge_compliance import (
     DEFAULT_JUDGE_MODEL,
     DEFAULT_JUDGE_PROVIDER,
+    DEFAULT_JUDGE_MAX_RETRIES,
     DEFAULT_JUDGE_REASONING_ENABLED,
+    DEFAULT_JUDGE_WORKERS,
+    DEFAULT_QUOTA_COOLDOWN,
+    DEFAULT_REQUEST_MAX_PER_PERIOD,
+    DEFAULT_REQUEST_MIN_INTERVAL,
+    DEFAULT_REQUEST_PERIOD,
 )
 JUDGE_SCRIPT = REPO_ROOT / "judge_compliance.py"
 
@@ -33,8 +40,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("response_files", nargs="*", type=Path, help="response files to judge")
     parser.add_argument("--response-list", type=Path, help="optional file with one response path per line")
-    parser.add_argument("--jobs", type=int, default=4, help="max number of response files to judge concurrently")
-    parser.add_argument("--workers", type=int, default=30, help="per-file worker count passed to judge_compliance.py")
+    parser.add_argument("--jobs", type=int, default=1, help="max number of response files to judge concurrently")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=DEFAULT_JUDGE_WORKERS,
+        help=f"per-file worker count passed to judge_compliance.py (default: {DEFAULT_JUDGE_WORKERS})",
+    )
     parser.add_argument("--force-restart", action="store_true", help="discard existing analysis file for each file")
     parser.add_argument("--max-errors", type=int, default=5, help="abort a child run after N permanent judge errors")
     parser.add_argument("--no-summary", action="store_true", help="skip child summaries")
@@ -43,7 +55,50 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-template-file", type=Path, help="optional custom prompt template file")
     parser.add_argument("--reasoning", action="store_true", help="enable reasoning for the judge model")
     parser.add_argument("--no-reasoning", dest="no_reasoning", action="store_true", help="disable reasoning for the judge model")
-    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], help="reasoning effort level")
+    parser.add_argument("--reasoning-effort", choices=["minimal", "low", "medium", "high"], help="reasoning effort level")
+    parser.add_argument(
+        "--request-min-interval",
+        type=float,
+        default=DEFAULT_REQUEST_MIN_INTERVAL,
+        help=(
+            "minimum seconds between judge request starts per child process "
+            f"(default: {DEFAULT_REQUEST_MIN_INTERVAL})"
+        ),
+    )
+    parser.add_argument(
+        "--request-max-per-period",
+        type=int,
+        default=DEFAULT_REQUEST_MAX_PER_PERIOD,
+        help=(
+            "maximum judge request starts allowed during each child rolling request period "
+            f"(default: {DEFAULT_REQUEST_MAX_PER_PERIOD})"
+        ),
+    )
+    parser.add_argument(
+        "--request-period",
+        type=float,
+        default=DEFAULT_REQUEST_PERIOD,
+        help=f"rolling quota period in seconds for --request-max-per-period (default: {DEFAULT_REQUEST_PERIOD:g})",
+    )
+    parser.add_argument("--limit", type=int, help="judge at most this many pending rows per child")
+    parser.add_argument(
+        "--judge-max-retries",
+        type=int,
+        default=DEFAULT_JUDGE_MAX_RETRIES,
+        help=(
+            "max retry attempts per judge row; every retry is rate-limited "
+            f"(default: {DEFAULT_JUDGE_MAX_RETRIES})"
+        ),
+    )
+    parser.add_argument(
+        "--quota-cooldown",
+        type=float,
+        default=DEFAULT_QUOTA_COOLDOWN,
+        help=(
+            "shared cooldown seconds after a quota/rate-limit error "
+            f"(default: {DEFAULT_QUOTA_COOLDOWN})"
+        ),
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("analysis"), help="directory for ComplianceAnalysis output")
     parser.add_argument("--output-stem-suffix", default="", help="suffix appended to compliance_<stem>.jsonl")
     parser.add_argument(
@@ -100,6 +155,12 @@ def build_child_command(args: argparse.Namespace, response_file: Path) -> list[s
         str(args.workers),
         "--max-errors",
         str(args.max_errors),
+        "--request-min-interval",
+        str(args.request_min_interval),
+        "--judge-max-retries",
+        str(args.judge_max_retries),
+        "--quota-cooldown",
+        str(args.quota_cooldown),
         "--judge-model",
         args.judge_model,
         "--judge-provider",
@@ -111,6 +172,11 @@ def build_child_command(args: argparse.Namespace, response_file: Path) -> list[s
         cmd.append("--force-restart")
     if args.no_summary:
         cmd.append("--no-summary")
+    if args.request_max_per_period is not None:
+        cmd.extend(["--request-max-per-period", str(args.request_max_per_period)])
+        cmd.extend(["--request-period", str(args.request_period)])
+    if args.limit is not None:
+        cmd.extend(["--limit", str(args.limit)])
     if args.prompt_template_file is not None:
         cmd.extend(["--prompt-template-file", str(args.prompt_template_file)])
     if args.reasoning:
@@ -169,6 +235,18 @@ def main() -> None:
         raise SystemExit("--reasoning-effort requires --reasoning")
     if args.jobs < 1:
         raise SystemExit("--jobs must be >= 1")
+    if args.request_min_interval < 0:
+        raise SystemExit("--request-min-interval must be >= 0")
+    if args.request_max_per_period is not None and args.request_max_per_period < 1:
+        raise SystemExit("--request-max-per-period must be >= 1")
+    if args.request_period <= 0:
+        raise SystemExit("--request-period must be > 0")
+    if args.limit is not None and args.limit < 1:
+        raise SystemExit("--limit must be >= 1")
+    if args.judge_max_retries < 0:
+        raise SystemExit("--judge-max-retries must be >= 0")
+    if args.quota_cooldown < 0:
+        raise SystemExit("--quota-cooldown must be >= 0")
 
     response_files = load_response_files(args)
     log_dir = args.log_dir or (args.output_dir / "judge_queue_logs")
@@ -176,6 +254,8 @@ def main() -> None:
 
     print(
         f"queueing {len(response_files)} files with jobs={args.jobs}, workers-per-file={args.workers}, "
+        f"request-min-interval={args.request_min_interval}, "
+        f"request-max-per-period={args.request_max_per_period}, request-period={args.request_period}, "
         f"output-dir={args.output_dir}",
         flush=True,
     )
@@ -194,6 +274,12 @@ def main() -> None:
     summary = {
         "jobs": args.jobs,
         "workers_per_file": args.workers,
+        "request_min_interval": args.request_min_interval,
+        "request_max_per_period": args.request_max_per_period,
+        "request_period": args.request_period,
+        "limit": args.limit,
+        "judge_max_retries": args.judge_max_retries,
+        "quota_cooldown": args.quota_cooldown,
         "judge_model": args.judge_model,
         "judge_provider": args.judge_provider,
         "output_dir": str(args.output_dir),
