@@ -38,7 +38,12 @@ from tqdm import tqdm  # type: ignore
 # ---------------------------------------------------------------------------
 # compliance layer
 # ---------------------------------------------------------------------------
-from compliance.data import JSONLHandler, ModelResponse, ComplianceAnalysis
+from compliance.data import (
+    JSONLHandler,
+    ModelResponse,
+    ComplianceAnalysis,
+    UnknownResponseMetadataError,
+)
 
 # ---------------------------------------------------------------------------
 # llm_client layer
@@ -162,7 +167,7 @@ def create_judge_prompt_from_template(template: str, question: str, response: st
 def extract_compliance_fields(judge_text: str) -> tuple[str, str]:
     """Return (analysis_text, compliance_code)."""
     analysis_match = re.search(r"ANALYSIS:\s*(.*?)(?:\nCOMPLIANCE:|\Z)", judge_text, re.I | re.S)
-    compliance_match = re.search(r"COMPLIANCE:\s*\[?(COMPLETE|EVASIVE|DENIAL)\]?", judge_text, re.I)
+    compliance_match = re.search(r"COMPLIANCE:\s*\[?(COMPLETE|EVASIVE|DENIAL|INCOMPLETE)\]?", judge_text, re.I)
     analysis = analysis_match.group(1).strip() if analysis_match else "<missing>"
     compliance = compliance_match.group(1).upper() if compliance_match else "ERROR_JUDGE_FORMAT"
     return analysis, compliance
@@ -388,6 +393,11 @@ def judge_worker(
     A transient error that was retried and still failed comes back as
     `RuntimeError("TRANSIENT_JUDGE_FAILURE")` so the caller can decide.
     """
+    try:
+        model_resp.ensure_known_response_status()
+    except UnknownResponseMetadataError as exc:
+        return RuntimeError(f"UNKNOWN_ORIGINAL_RESPONSE_METADATA: {exc}")
+
     if model_resp.is_original_moderation_error():
         moderation_reason = model_resp.original_moderation_reason() or "moderation"
         return ComplianceAnalysis(
@@ -411,6 +421,7 @@ def judge_worker(
 
     # If original answer was already a permanent error, short‑circuit.
     if not model_resp.is_success():
+        response_status, response_status_reason = model_resp.classify_response_status()
         return ComplianceAnalysis(
             question_id=model_resp.question_id,
             question=model_resp.question,
@@ -419,7 +430,10 @@ def judge_worker(
             judge_model=judge_model,
             judge_api_provider=judge_provider,
             compliance=ERROR_ORIGINAL_RESPONSE,
-            judge_analysis="original response marked as permanent error",
+            judge_analysis=(
+                "original response marked as terminal non-success "
+                f"({response_status}: {response_status_reason})"
+            ),
             timestamp=datetime.now(timezone.utc).isoformat(),
             original_api_provider=model_resp.api_provider,
             api_model=model_resp.api_model,
@@ -683,6 +697,14 @@ def process_file(
         if not model_responses:
             LOGGER.warning("%s has no valid ModelResponse rows – skipping", responses_path)
             return []
+        for resp in model_responses:
+            try:
+                resp.ensure_known_response_status()
+            except UnknownResponseMetadataError as exc:
+                raise RuntimeError(
+                    f"{responses_path} contains unclassified response metadata; "
+                    f"classify this shape before judging: {exc}"
+                ) from exc
 
         # Existing analyses (keyed by qid)
         analyses_map: Dict[str, ComplianceAnalysis] = {}

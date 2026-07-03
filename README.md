@@ -95,8 +95,30 @@ Original-model moderation/classifier stops are recorded as
 `ERROR_ORIGINAL_MODERATION`; judge-model content-filter stops are recorded as
 `ERROR_JUDGE_CONTENT_FILTER`. These are terminal rows. Do not rerun judging just
 to try to get past the classifier. `ask.py --frpe` preserves original moderation
-rows and is still appropriate for retrying original-model response failures that
-are not identified as moderation.
+rows and truncation rows. It is still appropriate for retrying original-model
+provider failures, empty responses, and missing-content rows.
+
+Response rows now carry internal `response_status` metadata when collected or
+rewritten by cleanup tools. The known terminal categories are `success`,
+`moderation`, `truncation`, `provider_error`, `metadata_error`,
+`missing_content`, and `empty_response`. Historical rows with null or ambiguous
+terminal metadata are `metadata_error`: keep them for manual review rather than
+blind FRPE retry. New rows with `metadata_error`, or finish/stop metadata that
+is not in the whitelist (`unknown_metadata`), are quarantined outside the main
+response file and abort collection. Judging refuses `unknown_metadata` rows
+until the metadata shape is classified. Audit current files with:
+
+Newly collected rows also preserve a `_llm_client` sidecar inside `response`
+with the client-standardized finish/error metadata and normalization evidence.
+Use that sidecar when the raw provider shape does not expose OpenAI-style
+`choices[0].finish_reason` fields directly.
+
+```bash
+PYTHONPATH=. uv run python tools/audit_response_statuses.py responses --top 30 --examples 20
+```
+
+Use `--write-annotations` on that audit command only after reviewing the counts;
+it rewrites response files with `response_status` and `response_status_reason`.
 
 ## Process new questions
 ```bash

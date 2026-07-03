@@ -54,6 +54,10 @@ def test_model_response_accepts_anthropic_messages_text_blocks():
     assert response.final_content_text() == "final answer"
     assert response.is_success() is True
     assert response.is_permanent_error() is False
+    assert response.classify_response_status() == (
+        "success",
+        "stop_reason:end_turn",
+    )
 
 
 def test_model_response_marks_anthropic_messages_empty_refusal_as_error():
@@ -77,6 +81,7 @@ def test_model_response_marks_anthropic_messages_empty_refusal_as_error():
     assert response.is_permanent_error() is True
     assert response.is_original_moderation_error() is True
     assert response.is_frpe_retry_candidate() is False
+    assert response.classify_response_status() == ("moderation", "refusal")
 
 
 def test_model_response_marks_anthropic_messages_max_tokens_as_error():
@@ -102,7 +107,12 @@ def test_model_response_marks_anthropic_messages_max_tokens_as_error():
     assert response.is_success() is False
     assert response.is_permanent_error() is True
     assert response.is_original_moderation_error() is False
-    assert response.is_frpe_retry_candidate() is True
+    assert response.is_truncation_error() is True
+    assert response.is_frpe_retry_candidate() is False
+    assert response.classify_response_status() == (
+        "truncation",
+        "stop_reason:max_tokens",
+    )
 
 
 def test_model_response_marks_chat_content_filter_refusal_as_nonretryable_moderation():
@@ -134,6 +144,7 @@ def test_model_response_marks_chat_content_filter_refusal_as_nonretryable_modera
     assert response.is_permanent_error() is True
     assert response.is_original_moderation_error() is True
     assert response.is_frpe_retry_candidate() is False
+    assert response.classify_response_status() == ("moderation", "content_filter")
 
 
 def test_model_response_marks_native_refusal_with_partial_text_as_moderation():

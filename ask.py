@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -42,7 +43,14 @@ except ImportError:  # pragma: no cover - non-Unix platforms
 # ---------------------------------------------------------------------------
 # compliance layer
 # ---------------------------------------------------------------------------
-from compliance.data import JSONLHandler, ModelResponse, Question
+from compliance.data import (
+    JSONLHandler,
+    ModelResponse,
+    Question,
+    RESPONSE_STATUS_METADATA_ERROR,
+    RESPONSE_STATUS_UNKNOWN_METADATA,
+    UnknownResponseMetadataError,
+)
 from compliance.models import ModelCatalog
 from compliance.utils.llm_requests import request_model_response, resolve_catalog_entry
 
@@ -58,6 +66,12 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+NO_EXTERNAL_API_SENTINEL = Path(".no_external_model_apis")
+NEW_RESPONSE_BLOCKED_STATUSES = {
+    RESPONSE_STATUS_METADATA_ERROR,
+    RESPONSE_STATUS_UNKNOWN_METADATA,
+}
 
 # Human-readable anonymized model names
 ADJECTIVES: List[str] = [
@@ -156,6 +170,37 @@ def load_model_responses(file_path: Path) -> List[ModelResponse]:
     return JSONLHandler.load_jsonl(file_path, ModelResponse)
 
 
+def ensure_known_response_rows(rows: List[ModelResponse], responses_path: Path) -> None:
+    """Fail fast if an existing response row has unclassified metadata."""
+    for row in rows:
+        try:
+            row.ensure_known_response_status()
+        except UnknownResponseMetadataError as exc:
+            LOGGER.error(
+                "%s contains unknown response metadata; classify it before continuing: %s",
+                responses_path,
+                exc,
+            )
+            sys.exit(3)
+
+
+def validate_new_response_metadata(row: ModelResponse) -> None:
+    """
+    Enforce stricter metadata policy for newly collected rows.
+
+    Existing metadata_error rows are legacy-readable, but new rows with missing
+    or ambiguous terminal metadata should be investigated before entering the
+    main response corpus.
+    """
+    row.ensure_known_response_status()
+    if row.response_status in NEW_RESPONSE_BLOCKED_STATUSES:
+        raise UnknownResponseMetadataError(
+            "new response has disallowed terminal metadata "
+            f"for question_id={row.question_id!r} model={row.model!r}: "
+            f"{row.response_status}: {row.response_status_reason}"
+        )
+
+
 def _is_empty_response(row: ModelResponse) -> bool:
     """Return True when the ModelResponse.response payload is empty.
 
@@ -169,8 +214,36 @@ def _is_empty_response(row: ModelResponse) -> bool:
         return True
 
 
+def response_payload_with_client_metadata(api_response) -> Dict[str, Any]:
+    """Return provider raw response with a non-destructive llm_client sidecar."""
+    raw_response = api_response.raw_provider_response
+    if isinstance(raw_response, dict):
+        response_payload: Dict[str, Any] = dict(raw_response)
+    else:
+        response_payload = {"_raw_provider_response": raw_response}
+
+    client_metadata: Dict[str, Any] = {
+        "success": bool(getattr(api_response, "success", False)),
+        "is_retryable": bool(getattr(api_response, "is_retryable", False)),
+    }
+    standardized_response = getattr(api_response, "standardized_response", None)
+    if isinstance(standardized_response, dict):
+        client_metadata["standardized_response"] = standardized_response
+    error_info = getattr(api_response, "error_info", None)
+    if isinstance(error_info, dict):
+        client_metadata["error_info"] = error_info
+    if getattr(api_response, "request_format", None) is not None:
+        client_metadata["request_format"] = api_response.request_format
+    if getattr(api_response, "raw_response_format", None) is not None:
+        client_metadata["raw_response_format"] = api_response.raw_response_format
+
+    response_payload["_llm_client"] = client_metadata
+    return response_payload
+
+
 def clean_frpe(responses_path: Path) -> List[ModelResponse]:
     existing_rows = load_model_responses(responses_path)
+    ensure_known_response_rows(existing_rows, responses_path)
     kept_rows: List[ModelResponse] = []
     removed_empty = 0
     removed_error = 0
@@ -329,6 +402,7 @@ def ask_worker(
     overrides: Optional[Dict[str, Any]] = None,
     system_prompt: Optional[str] = None,
     force_subprovider: Optional[str] = None,
+    timeout_seconds: int = 180,
 ):
     if limiter:
         limiter.acquire()
@@ -341,7 +415,7 @@ def ask_worker(
         overrides=overrides,
         system_prompt=system_prompt,
         force_subprovider=force_subprovider,
-        timeout=180,
+        timeout=timeout_seconds,
         context={"qid": question.id},
     )
 
@@ -363,6 +437,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", type=Path, help="output JSONL path (normal mode)")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--max-tokens", type=int, help="Max completion tokens for each answer (unset by default)")
+    parser.add_argument("--timeout-seconds", type=int, default=180, help="Per-request timeout in seconds")
     parser.add_argument(
         "--request-format",
         help="llm_client request format, e.g. chat_completions or anthropic_messages",
@@ -428,6 +503,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     args = build_arg_parser().parse_args(argv)
+
+    if NO_EXTERNAL_API_SENTINEL.exists() and os.environ.get("ALLOW_EXTERNAL_MODEL_APIS") != "1":
+        LOGGER.error(
+            "External model API calls are disabled by %s. "
+            "Set ALLOW_EXTERNAL_MODEL_APIS=1 only when API model usage has been explicitly approved.",
+            NO_EXTERNAL_API_SENTINEL,
+        )
+        sys.exit(2)
 
     # Enable anonymization by default when the questions file starts with 'anon'
     # (normal mode only — detect mode relies on an existing responses file name)
@@ -567,7 +650,9 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         kept_rows = clean_frpe(responses_path)
         done_ids = {row.question_id for row in kept_rows}
     else:
-        done_ids = {row.question_id for row in load_model_responses(responses_path)}
+        existing_rows = load_model_responses(responses_path)
+        ensure_known_response_rows(existing_rows, responses_path)
+        done_ids = {row.question_id for row in existing_rows}
 
     questions = load_questions(questions_file)
     pending_questions = [q for q in questions if q.id not in done_ids]
@@ -622,6 +707,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
                 request_overrides,
                 args.system_prompt,
                 args.force_subprovider,
+                args.timeout_seconds,
             ): question
             for question in pending_questions
         }
@@ -652,7 +738,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
                 question=question.question,
                 model=(anon_model_name or (canonical_name or api_model)) if anonymize else (canonical_name or api_model),
                 timestamp=datetime.now(timezone.utc).isoformat(),
-                response=api_response.raw_provider_response,
+                response=response_payload_with_client_metadata(api_response),
                 api_provider=None if anonymize else provider_name,
                 api_model=None if anonymize else api_model,
                 category=question.category,
@@ -660,6 +746,24 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
                 raw_response_format=getattr(api_response, "raw_response_format", None),
                 domain=question.domain,
             )
+            try:
+                validate_new_response_metadata(model_response)
+            except UnknownResponseMetadataError as exc:
+                status = model_response.response_status or RESPONSE_STATUS_UNKNOWN_METADATA
+                quarantine_path = responses_path.with_suffix(
+                    f"{responses_path.suffix}.{status}.jsonl"
+                )
+                JSONLHandler.save_jsonl([model_response], quarantine_path, append=True)
+                LOGGER.error(
+                    (
+                        "Disallowed response metadata for QID %s; quarantined row to %s "
+                        "and aborting so the metadata can be classified: %s"
+                    ),
+                    question.id,
+                    quarantine_path,
+                    exc,
+                )
+                sys.exit(3)
 
             JSONLHandler.save_jsonl([model_response], responses_path, append=True)
 
