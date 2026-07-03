@@ -97,6 +97,18 @@ Original-model moderation/classifier stops are recorded as
 to try to get past the classifier. `ask.py --frpe` preserves original moderation
 rows and truncation rows. It is still appropriate for retrying original-model
 provider failures, empty responses, and missing-content rows.
+Some providers report `stop` while returning empty final text and only zero or a
+few completion tokens. Treat that as content suppression
+(`empty_stop_content_suppressed`), not a transient missing-content row. The
+same treatment applies to Anthropic-family empty `stop` rows, including rows
+that contain hidden reasoning but no final assistant text. For non-Anthropic
+models with many completion tokens and no final text, keep the row in
+`missing_content` for targeted cleanup instead of assuming moderation.
+
+When adding any new response-status heuristic, audit its full catch set before
+making it permanent. At minimum, run `tools/audit_response_statuses.py`, count
+the proposed rows by model/provider/reason/token shape, inspect outliers, and
+add a regression test for the broadest shape the heuristic must not catch.
 
 Response rows now carry internal `response_status` metadata when collected or
 rewritten by cleanup tools. The known terminal categories are `success`,

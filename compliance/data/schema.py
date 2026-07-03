@@ -14,6 +14,7 @@ RESPONSE_STATUS_EMPTY_RESPONSE = "empty_response"
 RESPONSE_STATUS_MISSING_CONTENT = "missing_content"
 RESPONSE_STATUS_METADATA_ERROR = "metadata_error"
 RESPONSE_STATUS_UNKNOWN_METADATA = "unknown_metadata"
+EMPTY_STOP_SUPPRESSION_MAX_COMPLETION_TOKENS = 8
 
 SUCCESS_FINISH_REASONS = {
     "stop",
@@ -289,6 +290,45 @@ class ModelResponse:
         """True when the provider returned no final assistant text."""
         return self.final_content_text() == ""
 
+    def _completion_tokens(self) -> int | None:
+        """Return completion-token usage when available."""
+        if not isinstance(self.response, dict):
+            return None
+        usage = self.response.get("usage")
+        if not isinstance(usage, dict):
+            return None
+        completion_tokens = usage.get("completion_tokens")
+        return completion_tokens if isinstance(completion_tokens, int) else None
+
+    def _is_anthropic_model(self) -> bool:
+        return self.model.startswith("anthropic/")
+
+    def _has_empty_success_stop(self) -> bool:
+        """True when provider reports success/stop but delivered no final text."""
+        if not self._has_missing_final_content():
+            return False
+        if self._contains_api_error():
+            return False
+
+        primary_finish_reason = self._primary_finish_reason_with_source()
+        native_finish_reason = self._native_finish_reason()
+        finish_reasons = [
+            reason
+            for reason in (
+                primary_finish_reason[1] if primary_finish_reason else None,
+                native_finish_reason,
+            )
+            if isinstance(reason, str)
+        ]
+        if not finish_reasons or any(reason not in SUCCESS_FINISH_REASONS for reason in finish_reasons):
+            return False
+
+        completion_tokens = self._completion_tokens()
+        return self._is_anthropic_model() or (
+            completion_tokens is not None
+            and completion_tokens <= EMPTY_STOP_SUPPRESSION_MAX_COMPLETION_TOKENS
+        )
+
     def _contains_api_error(self) -> bool:
         """
         Tight clone of the old utils.llm_client.is_permanent_api_error
@@ -459,6 +499,9 @@ class ModelResponse:
             if isinstance(finish_reason, str):
                 return finish_reason
             return "content_filter"
+
+        if self._has_empty_success_stop():
+            return "empty_stop_content_suppressed"
 
         if isinstance(self.response, dict):
             top_error = self.response.get("error")

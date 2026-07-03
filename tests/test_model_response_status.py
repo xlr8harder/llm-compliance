@@ -5,15 +5,15 @@ import pytest
 from compliance.data import ModelResponse, UnknownResponseMetadataError
 
 
-def _response(response: dict) -> ModelResponse:
+def _response(response: dict, *, model: str = "test/model") -> ModelResponse:
     return ModelResponse(
         question_id="q1",
         question="Question?",
-        model="test/model",
+        model=model,
         timestamp=datetime.now(timezone.utc).isoformat(),
         response=response,
         api_provider="openrouter",
-        api_model="test/model",
+        api_model=model,
         category="us_hard",
     )
 
@@ -195,7 +195,7 @@ def test_llm_client_recitation_error_info_is_terminal_moderation():
     assert row.is_frpe_retry_candidate() is False
 
 
-def test_success_finish_with_empty_text_is_missing_content_retry_candidate():
+def test_success_finish_with_empty_text_is_terminal_suppression():
     row = _response(
         {
             "choices": [
@@ -203,12 +203,67 @@ def test_success_finish_with_empty_text_is_missing_content_retry_candidate():
                     "finish_reason": "stop",
                     "message": {"role": "assistant", "content": ""},
                 }
-            ]
+            ],
+            "usage": {"completion_tokens": 1},
         }
     )
 
-    assert row.classify_response_status() == ("missing_content", "missing_final_content")
+    assert row.classify_response_status() == (
+        "moderation",
+        "empty_stop_content_suppressed",
+    )
+    assert row.is_original_moderation_error() is True
     assert row.is_success() is False
+    assert row.is_frpe_retry_candidate() is False
+
+
+def test_anthropic_empty_stop_with_hidden_reasoning_is_terminal_suppression():
+    row = _response(
+        {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "native_finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "reasoning": "hidden reasoning without a final answer",
+                    },
+                }
+            ],
+            "usage": {"completion_tokens": 81},
+        },
+        model="anthropic/claude-opus-4.1-thinking",
+    )
+
+    assert row.classify_response_status() == (
+        "moderation",
+        "empty_stop_content_suppressed",
+    )
+    assert row.is_frpe_retry_candidate() is False
+
+
+def test_non_anthropic_long_empty_stop_remains_missing_content():
+    row = _response(
+        {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "native_finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "reasoning": "long hidden reasoning without a final answer",
+                    },
+                }
+            ],
+            "usage": {"completion_tokens": 1025},
+        },
+        model="qwen/qwq-32b",
+    )
+
+    assert row.classify_response_status() == ("missing_content", "missing_final_content")
+    assert row.is_original_moderation_error() is False
     assert row.is_frpe_retry_candidate() is True
 
 
