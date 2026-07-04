@@ -120,6 +120,11 @@ is not in the whitelist (`unknown_metadata`), are quarantined outside the main
 response file and abort collection. Judging refuses `unknown_metadata` rows
 until the metadata shape is classified. Audit current files with:
 
+After auditing a metadata-error shape and confirming the model is still
+available, use `ask.py --retry-metadata-errors` for an explicit repair pass.
+Do not fold metadata retry into normal `--frpe`; missing or ambiguous terminal
+metadata is a data-quality issue that needs classification if it recurs.
+
 Newly collected rows also preserve a `_llm_client` sidecar inside `response`
 with the client-standardized finish/error metadata and normalization evidence.
 Use that sidecar when the raw provider shape does not expose OpenAI-style

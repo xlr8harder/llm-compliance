@@ -11,6 +11,7 @@ Two modes
 Features
 --------
 * `--frpe`  – retry non-moderation permanent errors; keep moderation rows.
+* `--retry-metadata-errors` – explicitly retry legacy metadata-error rows.
 * Optional coherency gate (OpenRouter sub-provider blacklist).
 * Provider calls go through llm_client.retry_request.
 * ModelCatalog is lazily extended when a full mapping is supplied on the CLI.
@@ -241,12 +242,17 @@ def response_payload_with_client_metadata(api_response) -> Dict[str, Any]:
     return response_payload
 
 
-def clean_frpe(responses_path: Path) -> List[ModelResponse]:
+def clean_frpe(
+    responses_path: Path,
+    *,
+    retry_metadata_errors: bool = False,
+) -> List[ModelResponse]:
     existing_rows = load_model_responses(responses_path)
     ensure_known_response_rows(existing_rows, responses_path)
     kept_rows: List[ModelResponse] = []
     removed_empty = 0
     removed_error = 0
+    removed_metadata_error = 0
     removed_duplicate = 0
     kept_moderation = 0
     seen_question_ids: set[str] = set()
@@ -266,18 +272,23 @@ def clean_frpe(responses_path: Path) -> List[ModelResponse]:
         if row.is_frpe_retry_candidate():
             removed_error += 1
             continue
+        status, _reason = row.classify_response_status()
+        if retry_metadata_errors and status == RESPONSE_STATUS_METADATA_ERROR:
+            removed_metadata_error += 1
+            continue
         seen_question_ids.add(row.question_id)
         kept_rows.append(row)
 
-    removed_total = removed_empty + removed_error + removed_duplicate
+    removed_total = removed_empty + removed_error + removed_metadata_error + removed_duplicate
     if removed_total:
         LOGGER.info(
             (
-                "FRPE: removed %d rows (retryable_errors=%d, empty_response=%d, "
-                "duplicate_question_id=%d, kept_original_moderation=%d)"
+                "FRPE: removed %d rows (retryable_errors=%d, metadata_errors=%d, "
+                "empty_response=%d, duplicate_question_id=%d, kept_original_moderation=%d)"
             ),
             removed_total,
             removed_error,
+            removed_metadata_error,
             removed_empty,
             removed_duplicate,
             kept_moderation,
@@ -446,6 +457,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--frpe",
         action="store_true",
         help="clean non-moderation permanent errors before retrying",
+    )
+    parser.add_argument(
+        "--retry-metadata-errors",
+        action="store_true",
+        help=(
+            "explicitly remove legacy metadata_error rows for retry. "
+            "Use only after auditing the metadata shape and current model availability."
+        ),
     )
     parser.add_argument(
         "--anonymize",
@@ -646,8 +665,11 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         "on" if anonymize else "off",
     )
 
-    if args.frpe:
-        kept_rows = clean_frpe(responses_path)
+    if args.frpe or args.retry_metadata_errors:
+        kept_rows = clean_frpe(
+            responses_path,
+            retry_metadata_errors=args.retry_metadata_errors,
+        )
         done_ids = {row.question_id for row in kept_rows}
     else:
         existing_rows = load_model_responses(responses_path)

@@ -103,6 +103,39 @@ def test_frpe_keeps_legacy_metadata_error_rows_for_manual_review(tmp_path):
     assert kept[0].response_status == "metadata_error"
 
 
+def test_metadata_error_retry_requires_explicit_flag(tmp_path):
+    responses_path = tmp_path / "responses.jsonl"
+    metadata_error = _response(
+        "legacy-null",
+        {
+            "choices": [
+                {
+                    "finish_reason": None,
+                    "message": {"role": "assistant", "content": "legacy answer"},
+                }
+            ]
+        },
+    )
+    ok = _response(
+        "ok",
+        {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "answer"},
+                }
+            ]
+        },
+    )
+    JSONLHandler.save_jsonl([metadata_error, ok], responses_path)
+
+    kept = clean_frpe(responses_path, retry_metadata_errors=True)
+
+    assert [row.question_id for row in kept] == ["ok"]
+    reloaded = JSONLHandler.load_jsonl(responses_path, ModelResponse)
+    assert [row.question_id for row in reloaded] == ["ok"]
+
+
 def test_new_metadata_error_response_is_blocked_before_main_write():
     row = _response(
         "new-null",
