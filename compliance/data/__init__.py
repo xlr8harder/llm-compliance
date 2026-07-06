@@ -7,6 +7,7 @@ from .schema import (
     ModelResponse,
     ComplianceAnalysis,
     RESPONSE_STATUS_METADATA_ERROR,
+    RESPONSE_STATUS_TRUNCATION,
     RESPONSE_STATUS_UNKNOWN_METADATA,
     UnknownResponseMetadataError,
 )
@@ -18,6 +19,7 @@ __all__ = [
     'ModelResponse',
     'ComplianceAnalysis',
     'RESPONSE_STATUS_METADATA_ERROR',
+    'RESPONSE_STATUS_TRUNCATION',
     'RESPONSE_STATUS_UNKNOWN_METADATA',
     'UnknownResponseMetadataError',
     'JSONLHandler',

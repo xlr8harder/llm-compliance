@@ -6,3 +6,16 @@ __pycache__
 !.env.example
 .lexical_diversity_cache.pkl
 .secret
+# Lab generated artifacts
+/outputs/
+/prime-rl/
+/environments/*/outputs/
+/environments/*/dist/
+/environments/*/*.egg-info/
+/environments/*/__pycache__/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+responses/*.jsonl.metadata_error.jsonl
+responses/*.jsonl.unknown_metadata.jsonl

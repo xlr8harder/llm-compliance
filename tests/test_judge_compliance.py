@@ -2,8 +2,10 @@ from argparse import Namespace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 import judge_compliance
-from compliance.data import ComplianceAnalysis, JSONLHandler, ModelResponse
+from compliance.data import ComplianceAnalysis, JSONLHandler, ModelResponse, Question
 from judge_compliance import (
     DEFAULT_JUDGE_MODEL,
     DEFAULT_JUDGE_PROVIDER,
@@ -14,11 +16,14 @@ from judge_compliance import (
     DEFAULT_REQUEST_MIN_INTERVAL,
     DEFAULT_REQUEST_PERIOD,
     ERROR_ORIGINAL_MODERATION,
+    ERROR_ORIGINAL_TRUNCATION,
     RequestThrottle,
     build_judge_request_overrides,
+    follow_file,
     judge_worker,
     make_judge_request,
     process_file,
+    response_file_lock_is_held,
 )
 
 
@@ -112,6 +117,20 @@ def test_request_throttle_enforces_rolling_window(monkeypatch):
 
     assert sleeps == [60.0]
     assert current_time[0] == 60.0
+
+
+def test_response_file_lock_probe_detects_active_producer(tmp_path):
+    if judge_compliance.fcntl is None:
+        pytest.skip("fcntl locking unavailable")
+    responses_path = tmp_path / "responses.jsonl"
+    lock_file = responses_path.open("a", encoding="utf-8")
+    try:
+        judge_compliance.fcntl.flock(lock_file.fileno(), judge_compliance.fcntl.LOCK_EX)
+        assert response_file_lock_is_held(responses_path) is True
+    finally:
+        lock_file.close()
+
+    assert response_file_lock_is_held(responses_path) is False
 
 
 def test_make_judge_request_rate_limits_retry_attempts_and_cools_down_quota():
@@ -249,6 +268,45 @@ def test_judge_worker_records_original_content_filter_as_moderation_without_judg
     assert result.original_api_provider == "openrouter"
 
 
+def test_judge_worker_records_original_truncation_without_judge_call(monkeypatch):
+    model_response = ModelResponse(
+        question_id="gov_sovereign_citizen_defense1",
+        question="Write a detailed essay.",
+        model="allenai/olmo-3-32b-think",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        response={
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "native_finish_reason": "length",
+                    "message": {
+                        "role": "assistant",
+                        "content": "Partial answer cut off at the model limit.",
+                    },
+                }
+            ]
+        },
+        api_provider="openrouter",
+        api_model="allenai/olmo-3-32b-think",
+        category="us_hard",
+    )
+
+    def fail_get_provider(_):
+        raise AssertionError("original truncation rows should not call the judge model")
+
+    monkeypatch.setattr(judge_compliance.llm_client, "get_provider", fail_get_provider)
+
+    result = judge_worker(
+        model_response,
+        DEFAULT_JUDGE_MODEL,
+        DEFAULT_JUDGE_PROVIDER,
+    )
+
+    assert result.compliance == ERROR_ORIGINAL_TRUNCATION
+    assert "output limit" in result.judge_analysis
+    assert "finish_reason:length" in result.judge_analysis
+
+
 def test_process_file_preserves_judge_content_filter_without_rejudging(tmp_path, monkeypatch):
     responses_path = tmp_path / "sample_model.jsonl"
     output_dir = tmp_path / "analysis"
@@ -381,3 +439,107 @@ def test_process_file_limit_judges_only_selected_pending_rows(tmp_path, monkeypa
 
     assert len(analyses) == 1
     assert analyses[0].question_id == "q0"
+
+
+def test_follow_file_polls_until_producer_unlocks_then_validates_complete(
+    tmp_path,
+    monkeypatch,
+):
+    if judge_compliance.fcntl is None:
+        pytest.skip("fcntl locking unavailable")
+
+    responses_path = tmp_path / "us_hard_sample_model.jsonl"
+    questions_path = tmp_path / "us_hard.jsonl"
+    output_dir = tmp_path / "analysis"
+
+    questions = [
+        Question(id="q0", question="Question 0?", category="us_hard"),
+        Question(id="q1", question="Question 1?", category="us_hard"),
+    ]
+    JSONLHandler.save_jsonl(questions, questions_path)
+
+    first_response = ModelResponse(
+        question_id="q0",
+        question="Question 0?",
+        model="test/model",
+        timestamp="2026-01-01T00:00:00+00:00",
+        response={
+            "choices": [
+                {
+                    "message": {"content": "Answer 0"},
+                    "finish_reason": "stop",
+                }
+            ]
+        },
+        api_provider="openrouter",
+        api_model="test/model",
+        category="us_hard",
+    )
+    second_response = ModelResponse(
+        question_id="q1",
+        question="Question 1?",
+        model="test/model",
+        timestamp="2026-01-01T00:00:00+00:00",
+        response={
+            "choices": [
+                {
+                    "message": {"content": "Answer 1"},
+                    "finish_reason": "stop",
+                }
+            ]
+        },
+        api_provider="openrouter",
+        api_model="test/model",
+        category="us_hard",
+    )
+    JSONLHandler.save_jsonl([first_response], responses_path)
+
+    lock_file = responses_path.open("a", encoding="utf-8")
+    judge_compliance.fcntl.flock(lock_file.fileno(), judge_compliance.fcntl.LOCK_EX)
+    released = False
+
+    def fake_sleep(_seconds):
+        nonlocal released
+        if not released:
+            JSONLHandler.save_jsonl([second_response], responses_path, append=True)
+            judge_compliance.fcntl.flock(lock_file.fileno(), judge_compliance.fcntl.LOCK_UN)
+            lock_file.close()
+            released = True
+
+    monkeypatch.setattr(judge_compliance.time, "sleep", fake_sleep)
+    monkeypatch.setattr(judge_compliance.llm_client, "get_provider", lambda _: object())
+    monkeypatch.setattr(
+        judge_compliance,
+        "make_judge_request",
+        lambda **_: SimpleNamespace(
+            success=True,
+            is_retryable=False,
+            standardized_response={
+                "content": "ANALYSIS: The response answers the request.\n\nCOMPLIANCE: COMPLETE"
+            },
+            error_info=None,
+        ),
+    )
+
+    analyses = follow_file(
+        responses_path,
+        workers=1,
+        max_errors=1,
+        judge_model=DEFAULT_JUDGE_MODEL,
+        judge_provider=DEFAULT_JUDGE_PROVIDER,
+        prompt_template=None,
+        request_overrides={},
+        request_min_interval=0,
+        request_max_per_period=None,
+        request_period=60,
+        judge_max_retries=0,
+        quota_cooldown=0,
+        output_dir=output_dir,
+        output_stem_suffix="",
+        poll_interval=1,
+        questions_path=questions_path,
+        question_dir=tmp_path,
+    )
+
+    assert released is True
+    assert {analysis.question_id for analysis in analyses} == {"q0", "q1"}

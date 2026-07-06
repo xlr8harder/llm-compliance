@@ -19,6 +19,7 @@ Streaming version
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import random
@@ -42,6 +43,8 @@ from compliance.data import (
     JSONLHandler,
     ModelResponse,
     ComplianceAnalysis,
+    Question,
+    RESPONSE_STATUS_TRUNCATION,
     UnknownResponseMetadataError,
 )
 
@@ -49,6 +52,11 @@ from compliance.data import (
 # llm_client layer
 # ---------------------------------------------------------------------------
 import llm_client
+
+try:
+    import fcntl  # Unix-only advisory file locking
+except ImportError:  # pragma: no cover - non-Unix platforms
+    fcntl = None
 
 LOGGER = logging.getLogger("judge")
 logging.basicConfig(
@@ -119,6 +127,7 @@ DEFAULT_JUDGE_MAX_RETRIES = 2
 DEFAULT_QUOTA_COOLDOWN = 20.0
 ERROR_ORIGINAL_RESPONSE = "ERROR_ORIGINAL_RESPONSE"
 ERROR_ORIGINAL_MODERATION = "ERROR_ORIGINAL_MODERATION"
+ERROR_ORIGINAL_TRUNCATION = "ERROR_ORIGINAL_TRUNCATION"
 LEGACY_JUDGE_REASONING_DEFAULTS = {
     ("openrouter", "x-ai/grok-4.1-fast"): False,
 }
@@ -230,6 +239,111 @@ def load_jsonl_safe(path: Path, cls):
     if not path.exists():
         return []
     return JSONLHandler.load_jsonl(path, cls)
+
+
+def response_file_lock_is_held(responses_path: Path) -> bool:
+    """Return True when another process holds the response-file writer lock."""
+    if fcntl is None:
+        LOGGER.warning("File locking not available; assuming no active producer")
+        return False
+    if not responses_path.exists():
+        return False
+    with responses_path.open("a", encoding="utf-8") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    return False
+
+
+def assert_jsonl_decodes(path: Path) -> None:
+    """Raise if a finished file contains malformed JSONL."""
+    if not path.exists():
+        return
+    bad_lines: list[int] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                json.loads(stripped)
+            except json.JSONDecodeError:
+                bad_lines.append(line_number)
+    if bad_lines:
+        examples = ", ".join(str(line_number) for line_number in bad_lines[:10])
+        raise RuntimeError(f"{path} contains malformed JSONL at line(s): {examples}")
+
+
+def infer_question_path(response_path: Path, question_dir: Path) -> Path | None:
+    """Infer the source question file from the response filename prefix."""
+    response_stem = response_path.stem
+    question_paths = sorted(question_dir.glob("*.jsonl"), key=lambda path: len(path.stem), reverse=True)
+    for question_path in question_paths:
+        question_stem = question_path.stem
+        if response_stem == question_stem or response_stem.startswith(f"{question_stem}_"):
+            return question_path
+    return None
+
+
+def analysis_path_for(response_path: Path, output_dir: Path, output_stem_suffix: str) -> Path:
+    return output_dir / f"compliance_{response_path.stem}{output_stem_suffix}.jsonl"
+
+
+def validate_follow_completion(
+    *,
+    responses_path: Path,
+    analysis_path: Path,
+    questions_path: Path,
+) -> None:
+    """Require one response per prompt and one analysis per response."""
+    if not questions_path.exists():
+        raise RuntimeError(f"question file not found for follow completion check: {questions_path}")
+    assert_jsonl_decodes(responses_path)
+    assert_jsonl_decodes(analysis_path)
+    questions = JSONLHandler.load_jsonl(questions_path, Question)
+    if not questions:
+        raise RuntimeError(f"question file has no readable questions: {questions_path}")
+    responses = load_jsonl_safe(responses_path, ModelResponse)
+    analyses = load_jsonl_safe(analysis_path, ComplianceAnalysis)
+
+    question_ids = {question.id for question in questions}
+    response_counts: Dict[str, int] = defaultdict(int)
+    for response in responses:
+        response_counts[response.question_id] += 1
+    response_ids = set(response_counts)
+    analysis_ids = {analysis.question_id for analysis in analyses}
+
+    duplicate_response_ids = sorted(qid for qid, count in response_counts.items() if count > 1)
+    missing_response_ids = sorted(question_ids - response_ids)
+    extra_response_ids = sorted(response_ids - question_ids)
+    missing_analysis_ids = sorted(response_ids - analysis_ids)
+    extra_analysis_ids = sorted(analysis_ids - response_ids)
+
+    blockers: list[str] = []
+    if duplicate_response_ids:
+        blockers.append(
+            f"duplicate response rows={len(duplicate_response_ids)} examples={duplicate_response_ids[:10]}"
+        )
+    if missing_response_ids:
+        blockers.append(
+            f"missing response rows={len(missing_response_ids)} examples={missing_response_ids[:10]}"
+        )
+    if extra_response_ids:
+        blockers.append(
+            f"response rows not in question set={len(extra_response_ids)} examples={extra_response_ids[:10]}"
+        )
+    if missing_analysis_ids:
+        blockers.append(
+            f"missing analysis rows={len(missing_analysis_ids)} examples={missing_analysis_ids[:10]}"
+        )
+    if extra_analysis_ids:
+        blockers.append(
+            f"analysis rows without response={len(extra_analysis_ids)} examples={extra_analysis_ids[:10]}"
+        )
+    if blockers:
+        raise RuntimeError("; ".join(blockers))
 
 
 def collect_error_strings(value: object) -> list[str]:
@@ -345,8 +459,15 @@ def analysis_matches_current_response_state(
     """Return True when the analysis is compatible with the current response state."""
     if resp.is_original_moderation_error():
         return analysis.compliance == ERROR_ORIGINAL_MODERATION
+    response_status, _response_status_reason = resp.classify_response_status()
+    if response_status == RESPONSE_STATUS_TRUNCATION:
+        return analysis.compliance == ERROR_ORIGINAL_TRUNCATION
     if resp.is_success():
-        return analysis.compliance not in {ERROR_ORIGINAL_RESPONSE, ERROR_ORIGINAL_MODERATION}
+        return analysis.compliance not in {
+            ERROR_ORIGINAL_RESPONSE,
+            ERROR_ORIGINAL_MODERATION,
+            ERROR_ORIGINAL_TRUNCATION,
+        }
     return analysis.compliance == ERROR_ORIGINAL_RESPONSE
 
 
@@ -422,6 +543,25 @@ def judge_worker(
     # If original answer was already a permanent error, short‑circuit.
     if not model_resp.is_success():
         response_status, response_status_reason = model_resp.classify_response_status()
+        if response_status == RESPONSE_STATUS_TRUNCATION:
+            return ComplianceAnalysis(
+                question_id=model_resp.question_id,
+                question=model_resp.question,
+                model=model_resp.model,
+                response=model_resp.response,
+                judge_model=judge_model,
+                judge_api_provider=judge_provider,
+                compliance=ERROR_ORIGINAL_TRUNCATION,
+                judge_analysis=(
+                    "original response stopped by provider/model output limit "
+                    f"({response_status}: {response_status_reason})"
+                ),
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                original_api_provider=model_resp.api_provider,
+                api_model=model_resp.api_model,
+                category=model_resp.category or "undefined",
+                domain=model_resp.domain,
+            )
         return ComplianceAnalysis(
             question_id=model_resp.question_id,
             question=model_resp.question,
@@ -609,6 +749,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         help="judge at most this many currently pending rows, useful for quota probes",
+    )
+    parser.add_argument(
+        "--follow",
+        action="store_true",
+        help="poll a response file while ask.py holds its writer lock, then run a final completeness check",
+    )
+    parser.add_argument(
+        "--follow-poll-interval",
+        type=float,
+        default=30.0,
+        help="seconds between full-file polling passes in --follow mode",
+    )
+    parser.add_argument(
+        "--questions",
+        type=Path,
+        help="question JSONL file for --follow final prompt coverage checks",
+    )
+    parser.add_argument(
+        "--question-dir",
+        type=Path,
+        default=Path("questions"),
+        help="directory used to infer the question file in --follow mode",
     )
     parser.add_argument(
         "--judge-max-retries",
@@ -857,6 +1019,103 @@ def process_file(
         # Return all analyses for this file
         return list(analyses_map.values())
 
+
+def follow_file(
+    responses_path: Path,
+    *,
+    workers: int,
+    max_errors: int,
+    judge_model: str,
+    judge_provider: str,
+    prompt_template: Optional[str],
+    request_overrides: Dict[str, object],
+    request_min_interval: float,
+    request_max_per_period: Optional[int],
+    request_period: float,
+    judge_max_retries: int,
+    quota_cooldown: float,
+    output_dir: Path,
+    output_stem_suffix: str,
+    poll_interval: float,
+    questions_path: Path | None,
+    question_dir: Path,
+) -> List[ComplianceAnalysis]:
+    """
+    Repeatedly process a response file while an ask.py producer holds its lock.
+
+    This intentionally reuses process_file on the whole response file each pass;
+    existing analysis staleness/no-replay logic decides what actually needs
+    judging.
+    """
+    inferred_questions_path = questions_path or infer_question_path(responses_path, question_dir)
+    if inferred_questions_path is None:
+        raise RuntimeError(
+            f"could not infer question file for {responses_path}; pass --questions in --follow mode"
+        )
+
+    LOGGER.info(
+        "Following %s (poll_interval=%.1fs, questions=%s)",
+        responses_path,
+        poll_interval,
+        inferred_questions_path,
+    )
+
+    while True:
+        analyses = process_file(
+            responses_path=responses_path,
+            workers=workers,
+            max_errors=max_errors,
+            force_restart=False,
+            judge_model=judge_model,
+            judge_provider=judge_provider,
+            prompt_template=prompt_template,
+            request_overrides=request_overrides,
+            request_min_interval=request_min_interval,
+            request_max_per_period=request_max_per_period,
+            request_period=request_period,
+            limit=None,
+            judge_max_retries=judge_max_retries,
+            quota_cooldown=quota_cooldown,
+            output_dir=output_dir,
+            output_stem_suffix=output_stem_suffix,
+        )
+
+        if response_file_lock_is_held(responses_path):
+            LOGGER.info("Producer lock is still held for %s; polling again in %.1fs", responses_path, poll_interval)
+            time.sleep(poll_interval)
+            continue
+
+        LOGGER.info("Producer lock is not held for %s; running final pass", responses_path)
+        analyses = process_file(
+            responses_path=responses_path,
+            workers=workers,
+            max_errors=max_errors,
+            force_restart=False,
+            judge_model=judge_model,
+            judge_provider=judge_provider,
+            prompt_template=prompt_template,
+            request_overrides=request_overrides,
+            request_min_interval=request_min_interval,
+            request_max_per_period=request_max_per_period,
+            request_period=request_period,
+            limit=None,
+            judge_max_retries=judge_max_retries,
+            quota_cooldown=quota_cooldown,
+            output_dir=output_dir,
+            output_stem_suffix=output_stem_suffix,
+        )
+        if response_file_lock_is_held(responses_path):
+            LOGGER.info("Producer lock reappeared for %s; returning to follow loop", responses_path)
+            time.sleep(poll_interval)
+            continue
+
+        validate_follow_completion(
+            responses_path=responses_path,
+            analysis_path=analysis_path_for(responses_path, output_dir, output_stem_suffix),
+            questions_path=inferred_questions_path,
+        )
+        return analyses
+
 ###############################################################################
 # Entrypoint wrapper
 ###############################################################################
@@ -877,6 +1136,18 @@ def main(argv: Optional[List[str]] | None = None) -> None:  # noqa: D401
         sys.exit(2)
     if args.limit is not None and args.limit < 1:
         LOGGER.error("--limit must be >= 1")
+        sys.exit(2)
+    if args.follow_poll_interval <= 0:
+        LOGGER.error("--follow-poll-interval must be > 0")
+        sys.exit(2)
+    if args.follow and args.force_restart:
+        LOGGER.error("--follow cannot be combined with --force-restart")
+        sys.exit(2)
+    if args.follow and args.limit is not None:
+        LOGGER.error("--follow cannot be combined with --limit")
+        sys.exit(2)
+    if args.follow and args.questions is not None and len(args.response_files) != 1:
+        LOGGER.error("--questions can only be used with one response file")
         sys.exit(2)
     if args.judge_max_retries < 0:
         LOGGER.error("--judge-max-retries must be >= 0")
@@ -900,24 +1171,45 @@ def main(argv: Optional[List[str]] | None = None) -> None:  # noqa: D401
     
     for path in args.response_files:
         try:
-            analyses = process_file(
-                responses_path=path,
-                workers=args.workers,
-                max_errors=args.max_errors,
-                force_restart=args.force_restart,
-                judge_model=args.judge_model,
-                judge_provider=args.judge_provider,
-                prompt_template=prompt_template,
-                request_overrides=request_overrides,
-                request_min_interval=args.request_min_interval,
-                request_max_per_period=args.request_max_per_period,
-                request_period=args.request_period,
-                limit=args.limit,
-                judge_max_retries=args.judge_max_retries,
-                quota_cooldown=args.quota_cooldown,
-                output_dir=args.output_dir,
-                output_stem_suffix=args.output_stem_suffix,
-            )
+            if args.follow:
+                analyses = follow_file(
+                    responses_path=path,
+                    workers=args.workers,
+                    max_errors=args.max_errors,
+                    judge_model=args.judge_model,
+                    judge_provider=args.judge_provider,
+                    prompt_template=prompt_template,
+                    request_overrides=request_overrides,
+                    request_min_interval=args.request_min_interval,
+                    request_max_per_period=args.request_max_per_period,
+                    request_period=args.request_period,
+                    judge_max_retries=args.judge_max_retries,
+                    quota_cooldown=args.quota_cooldown,
+                    output_dir=args.output_dir,
+                    output_stem_suffix=args.output_stem_suffix,
+                    poll_interval=args.follow_poll_interval,
+                    questions_path=args.questions,
+                    question_dir=args.question_dir,
+                )
+            else:
+                analyses = process_file(
+                    responses_path=path,
+                    workers=args.workers,
+                    max_errors=args.max_errors,
+                    force_restart=args.force_restart,
+                    judge_model=args.judge_model,
+                    judge_provider=args.judge_provider,
+                    prompt_template=prompt_template,
+                    request_overrides=request_overrides,
+                    request_min_interval=args.request_min_interval,
+                    request_max_per_period=args.request_max_per_period,
+                    request_period=args.request_period,
+                    limit=args.limit,
+                    judge_max_retries=args.judge_max_retries,
+                    quota_cooldown=args.quota_cooldown,
+                    output_dir=args.output_dir,
+                    output_stem_suffix=args.output_stem_suffix,
+                )
             
             # Group analyses by category
             for analysis in analyses:

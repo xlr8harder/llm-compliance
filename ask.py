@@ -20,10 +20,11 @@ Features
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -49,6 +50,7 @@ from compliance.data import (
     ModelResponse,
     Question,
     RESPONSE_STATUS_METADATA_ERROR,
+    RESPONSE_STATUS_TRUNCATION,
     RESPONSE_STATUS_UNKNOWN_METADATA,
     UnknownResponseMetadataError,
 )
@@ -73,6 +75,8 @@ NEW_RESPONSE_BLOCKED_STATUSES = {
     RESPONSE_STATUS_METADATA_ERROR,
     RESPONSE_STATUS_UNKNOWN_METADATA,
 }
+DEFAULT_MAX_TRUNCATIONS = 0
+TRUNCATION_ABORT_EXIT_CODE = 4
 
 # Human-readable anonymized model names
 ADJECTIVES: List[str] = [
@@ -202,6 +206,26 @@ def validate_new_response_metadata(row: ModelResponse) -> None:
         )
 
 
+def format_truncation_guard_message(
+    *,
+    truncation_count: int,
+    max_truncations: int,
+    max_tokens: Any,
+    responses_path: Path,
+    in_flight: int,
+) -> str:
+    return (
+        "Truncation guard reached: collected "
+        f"{truncation_count} newly truncated response(s) "
+        f"(threshold --max-truncations={max_truncations}, current max_tokens={max_tokens}). "
+        "This is a cost and data-quality decision point: either rerun with a larger "
+        "--max-tokens after choosing the output budget, or pass --allow-truncations "
+        "to intentionally keep collecting capped partial answers. "
+        f"Stopped submitting new requests; waiting for {in_flight} in-flight request(s) "
+        f"to finish. Responses collected so far are in {responses_path}."
+    )
+
+
 def _is_empty_response(row: ModelResponse) -> bool:
     """Return True when the ModelResponse.response payload is empty.
 
@@ -242,10 +266,25 @@ def response_payload_with_client_metadata(api_response) -> Dict[str, Any]:
     return response_payload
 
 
+def save_model_responses_in_place(rows: List[ModelResponse], responses_path: Path) -> None:
+    """Rewrite a responses file without replacing its inode.
+
+    The producer lock is held on the response file itself. Atomic replacement
+    would leave the lock on the old inode, so cleanup rewrites must truncate the
+    locked file in place.
+    """
+    responses_path.parent.mkdir(parents=True, exist_ok=True)
+    with responses_path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row.to_dict(), ensure_ascii=False) + "\n")
+
+
 def clean_frpe(
     responses_path: Path,
     *,
+    retry_frpe: bool = True,
     retry_metadata_errors: bool = False,
+    retry_truncations: bool = False,
 ) -> List[ModelResponse]:
     existing_rows = load_model_responses(responses_path)
     ensure_known_response_rows(existing_rows, responses_path)
@@ -253,12 +292,13 @@ def clean_frpe(
     removed_empty = 0
     removed_error = 0
     removed_metadata_error = 0
+    removed_truncation = 0
     removed_duplicate = 0
     kept_moderation = 0
     seen_question_ids: set[str] = set()
 
     for row in existing_rows:
-        if _is_empty_response(row):
+        if retry_frpe and _is_empty_response(row):
             removed_empty += 1
             continue
         if row.question_id in seen_question_ids:
@@ -269,31 +309,42 @@ def clean_frpe(
             kept_rows.append(row)
             kept_moderation += 1
             continue
-        if row.is_frpe_retry_candidate():
+        if retry_frpe and row.is_frpe_retry_candidate():
             removed_error += 1
             continue
         status, _reason = row.classify_response_status()
         if retry_metadata_errors and status == RESPONSE_STATUS_METADATA_ERROR:
             removed_metadata_error += 1
             continue
+        if retry_truncations and status == RESPONSE_STATUS_TRUNCATION:
+            removed_truncation += 1
+            continue
         seen_question_ids.add(row.question_id)
         kept_rows.append(row)
 
-    removed_total = removed_empty + removed_error + removed_metadata_error + removed_duplicate
+    removed_total = (
+        removed_empty
+        + removed_error
+        + removed_metadata_error
+        + removed_truncation
+        + removed_duplicate
+    )
     if removed_total:
         LOGGER.info(
             (
-                "FRPE: removed %d rows (retryable_errors=%d, metadata_errors=%d, "
+                "Retry cleanup: removed %d rows (retryable_errors=%d, metadata_errors=%d, "
+                "truncations=%d, "
                 "empty_response=%d, duplicate_question_id=%d, kept_original_moderation=%d)"
             ),
             removed_total,
             removed_error,
             removed_metadata_error,
+            removed_truncation,
             removed_empty,
             removed_duplicate,
             kept_moderation,
         )
-    JSONLHandler.save_jsonl(kept_rows, responses_path, append=False)
+    save_model_responses_in_place(kept_rows, responses_path)
     return kept_rows
 
 
@@ -312,8 +363,11 @@ def _print_final_state(responses_path: Path) -> None:
     print(str(responses_path.resolve()))
 
 
-def acquire_responses_lock(responses_path: Path):
+def acquire_responses_lock(responses_path: Path, *, skip_lock: bool = False):
     """Prevent concurrent writers for the same responses file."""
+    if skip_lock:
+        LOGGER.warning("Skipping responses file lock for %s", responses_path)
+        return None
     if fcntl is None:
         LOGGER.warning("File locking not available; proceeding without a lock")
         return None
@@ -448,6 +502,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", type=Path, help="output JSONL path (normal mode)")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--max-tokens", type=int, help="Max completion tokens for each answer (unset by default)")
+    parser.add_argument(
+        "--max-truncations",
+        type=int,
+        default=DEFAULT_MAX_TRUNCATIONS,
+        help=(
+            "Abort after this many newly collected truncation responses unless "
+            "--allow-truncations is set. 0 aborts on the first new truncation."
+        ),
+    )
+    parser.add_argument(
+        "--allow-truncations",
+        action="store_true",
+        help=(
+            "continue collecting responses even when the provider reports a length/max_tokens "
+            "truncation. Use only after deciding capped partial answers are acceptable."
+        ),
+    )
     parser.add_argument("--timeout-seconds", type=int, default=180, help="Per-request timeout in seconds")
     parser.add_argument(
         "--request-format",
@@ -464,6 +535,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "explicitly remove legacy metadata_error rows for retry. "
             "Use only after auditing the metadata shape and current model availability."
+        ),
+    )
+    parser.add_argument(
+        "--retry-truncations",
+        action="store_true",
+        help=(
+            "explicitly remove existing length/max_tokens truncation rows before retrying, "
+            "typically with a larger --max-tokens value"
         ),
     )
     parser.add_argument(
@@ -513,6 +592,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--force-subprovider",
         help="OpenRouter only: restrict to a single subprovider (uses OpenRouter 'only').",
     )
+    parser.add_argument(
+        "--skip-lock",
+        action="store_true",
+        help="do not acquire the responses file writer lock; use only for manual recovery",
+    )
 
     return parser
 
@@ -522,6 +606,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     args = build_arg_parser().parse_args(argv)
+
+    if args.max_truncations < 0:
+        LOGGER.error("--max-truncations must be >= 0")
+        sys.exit(2)
 
     if NO_EXTERNAL_API_SENTINEL.exists() and os.environ.get("ALLOW_EXTERNAL_MODEL_APIS") != "1":
         LOGGER.error(
@@ -600,7 +688,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
 
     # Ensure output directory exists now that responses_path is finalized
     responses_path.parent.mkdir(parents=True, exist_ok=True)
-    _responses_lock = acquire_responses_lock(responses_path)
+    _responses_lock = acquire_responses_lock(responses_path, skip_lock=args.skip_lock)
 
     if args.force_subprovider and provider_name != "openrouter":
         LOGGER.error("--force-subprovider is only supported with provider=openrouter")
@@ -665,10 +753,12 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         "on" if anonymize else "off",
     )
 
-    if args.frpe or args.retry_metadata_errors:
+    if args.frpe or args.retry_metadata_errors or args.retry_truncations:
         kept_rows = clean_frpe(
             responses_path,
+            retry_frpe=args.frpe or args.retry_metadata_errors,
             retry_metadata_errors=args.retry_metadata_errors,
+            retry_truncations=args.retry_truncations,
         )
         done_ids = {row.question_id for row in kept_rows}
     else:
@@ -717,9 +807,23 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     else:
         limiter = None
 
+    truncation_count = 0
+    truncation_guard_fired = False
+    responses_written = 0
+    max_tokens_display = request_overrides.get("max_tokens", "<provider default>")
+
     with ThreadPoolExecutor(max_workers=args.workers) as pool, tqdm(total=len(pending_questions)) as tqdm_bar:
-        future_map = {
-            pool.submit(
+        pending_iter = iter(pending_questions)
+        future_map = {}
+
+        def submit_next() -> bool:
+            if truncation_guard_fired:
+                return False
+            try:
+                question = next(pending_iter)
+            except StopIteration:
+                return False
+            future = pool.submit(
                 ask_worker,
                 question,
                 provider_name,
@@ -730,68 +834,109 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
                 args.system_prompt,
                 args.force_subprovider,
                 args.timeout_seconds,
-            ): question
-            for question in pending_questions
-        }
-        for future in as_completed(future_map):
-            question = future_map[future]
-            tqdm_bar.update(1)
-            try:
-                api_response = future.result()
-            except Exception as exc:  # noqa: BLE001
-                LOGGER.exception("Worker raised for QID %s: %s", question.id, exc)
-                continue
+            )
+            future_map[future] = question
+            return True
 
-            # Defensive logging: sometimes providers return an empty payload ({}).
-            # Keep a record but surface a warning so FRPE can cleanly retry later.
-            try:
-                if not api_response.raw_provider_response:
-                    LOGGER.warning(
-                        "Empty provider response for QID %s (model=%s provider=%s) — recorded for FRPE",
-                        question.id,
-                        api_model,
-                        provider_name,
+        while len(future_map) < args.workers and submit_next():
+            pass
+
+        while future_map:
+            done_futures, _pending_futures = wait(future_map, return_when=FIRST_COMPLETED)
+            # Drain any additional completions that landed before we started processing.
+            done_futures = {future for future in future_map if future.done()} | done_futures
+
+            for future in done_futures:
+                question = future_map.pop(future)
+                tqdm_bar.update(1)
+                try:
+                    api_response = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.exception("Worker raised for QID %s: %s", question.id, exc)
+                    continue
+
+                # Defensive logging: sometimes providers return an empty payload ({}).
+                # Keep a record but surface a warning so FRPE can cleanly retry later.
+                try:
+                    if not api_response.raw_provider_response:
+                        LOGGER.warning(
+                            "Empty provider response for QID %s (model=%s provider=%s) — recorded for FRPE",
+                            question.id,
+                            api_model,
+                            provider_name,
+                        )
+                except Exception:  # noqa: BLE001
+                    pass
+
+                model_response = ModelResponse(
+                    question_id=question.id,
+                    question=question.question,
+                    model=(anon_model_name or (canonical_name or api_model)) if anonymize else (canonical_name or api_model),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    response=response_payload_with_client_metadata(api_response),
+                    api_provider=None if anonymize else provider_name,
+                    api_model=None if anonymize else api_model,
+                    category=question.category,
+                    request_format=getattr(api_response, "request_format", None),
+                    raw_response_format=getattr(api_response, "raw_response_format", None),
+                    domain=question.domain,
+                )
+                try:
+                    validate_new_response_metadata(model_response)
+                except UnknownResponseMetadataError as exc:
+                    status = model_response.response_status or RESPONSE_STATUS_UNKNOWN_METADATA
+                    quarantine_path = responses_path.with_suffix(
+                        f"{responses_path.suffix}.{status}.jsonl"
                     )
-            except Exception:  # noqa: BLE001
+                    JSONLHandler.save_jsonl([model_response], quarantine_path, append=True)
+                    LOGGER.error(
+                        (
+                            "Disallowed response metadata for QID %s; quarantined row to %s "
+                            "and aborting so the metadata can be classified: %s"
+                        ),
+                        question.id,
+                        quarantine_path,
+                        exc,
+                    )
+                    sys.exit(3)
+
+                JSONLHandler.save_jsonl([model_response], responses_path, append=True)
+                responses_written += 1
+
+                if model_response.response_status == RESPONSE_STATUS_TRUNCATION:
+                    truncation_count += 1
+                    if args.allow_truncations:
+                        LOGGER.warning(
+                            "Collected truncation response for QID %s; continuing because --allow-truncations is set",
+                            question.id,
+                        )
+                    elif not truncation_guard_fired and truncation_count >= args.max_truncations:
+                        truncation_guard_fired = True
+                        LOGGER.error(
+                            format_truncation_guard_message(
+                                truncation_count=truncation_count,
+                                max_truncations=args.max_truncations,
+                                max_tokens=max_tokens_display,
+                                responses_path=responses_path,
+                                in_flight=len(future_map),
+                            )
+                        )
+
+            while len(future_map) < args.workers and submit_next():
                 pass
 
-            model_response = ModelResponse(
-                question_id=question.id,
-                question=question.question,
-                model=(anon_model_name or (canonical_name or api_model)) if anonymize else (canonical_name or api_model),
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                response=response_payload_with_client_metadata(api_response),
-                api_provider=None if anonymize else provider_name,
-                api_model=None if anonymize else api_model,
-                category=question.category,
-                request_format=getattr(api_response, "request_format", None),
-                raw_response_format=getattr(api_response, "raw_response_format", None),
-                domain=question.domain,
+        if truncation_guard_fired:
+            LOGGER.error(
+                "Run stopped by truncation guard after writing %d new response(s); file now has %d total rows",
+                responses_written,
+                len(load_model_responses(responses_path)),
             )
-            try:
-                validate_new_response_metadata(model_response)
-            except UnknownResponseMetadataError as exc:
-                status = model_response.response_status or RESPONSE_STATUS_UNKNOWN_METADATA
-                quarantine_path = responses_path.with_suffix(
-                    f"{responses_path.suffix}.{status}.jsonl"
-                )
-                JSONLHandler.save_jsonl([model_response], quarantine_path, append=True)
-                LOGGER.error(
-                    (
-                        "Disallowed response metadata for QID %s; quarantined row to %s "
-                        "and aborting so the metadata can be classified: %s"
-                    ),
-                    question.id,
-                    quarantine_path,
-                    exc,
-                )
-                sys.exit(3)
-
-            JSONLHandler.save_jsonl([model_response], responses_path, append=True)
+            _print_final_state(responses_path)
+            sys.exit(TRUNCATION_ABORT_EXIT_CODE)
 
         LOGGER.info(
             "Completed run → wrote %d new responses (file now has %d total)",
-            len(pending_questions),
+            responses_written,
             len(load_model_responses(responses_path)),
         )
 
