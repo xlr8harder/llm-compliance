@@ -3,7 +3,13 @@ import pytest
 from ask import apply_reasoning_request_overrides
 from compliance.data import ModelResponse
 from compliance.utils.reasoning import summarize_reasoning_payload
-from tools.probe_reasoning import build_probe_overrides, recommend_configuration
+from tools.probe_reasoning import (
+    PROBE_OUTCOME_REASONING_MANDATORY,
+    build_probe_overrides,
+    classify_probe_result,
+    reasoning_present,
+    recommend_configuration,
+)
 
 
 def test_summarize_reasoning_payload_detects_anthropic_messages_blocks():
@@ -282,6 +288,207 @@ def test_recommendation_uses_effort_none_when_enabled_false_does_not_disable_rea
     assert recommendation["mode"] == "paired_modes"
     assert recommendation["base_run_flags"] == ["--reasoning", "--reasoning-effort", "none"]
     assert recommendation["reasoning_canonical_name"] == "x-ai/grok-4.3-reasoning"
+
+
+def _openrouter_probe_result(probe, raw_response, request_overrides=None):
+    return {
+        "probe": probe,
+        "request_overrides": request_overrides or {},
+        "request_format": "chat_completions",
+        "raw_response_format": (
+            "openrouter.error" if raw_response.get("error") else "openrouter.chat_completions"
+        ),
+        "summary": summarize_reasoning_payload(raw_response).to_dict(),
+    }
+
+
+def _grok_45_success_response(*, reasoning_tokens, reasoning_text):
+    return {
+        "id": "gen-1783538845-BocK8mIzbL4Eaasx3nyY",
+        "provider": "xAI",
+        "model": "x-ai/grok-4.5-20260708",
+        "object": "chat.completion",
+        "created": 1783538845,
+        "choices": [
+            {
+                "logprobs": None,
+                "finish_reason": "stop",
+                "native_finish_reason": "completed",
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "ok",
+                    "refusal": None,
+                    "reasoning": reasoning_text,
+                },
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 211,
+            "completion_tokens": reasoning_tokens + 1,
+            "total_tokens": 212 + reasoning_tokens,
+            "cost": 0.000434,
+            "is_byok": False,
+            "prompt_tokens_details": {
+                "cached_tokens": 128,
+                "cache_write_tokens": 0,
+                "audio_tokens": 0,
+                "video_tokens": 0,
+            },
+            "cost_details": {
+                "upstream_inference_cost": 0.000434,
+                "upstream_inference_prompt_cost": 0.00023,
+                "upstream_inference_completions_cost": 0.000204,
+            },
+            "completion_tokens_details": {
+                "reasoning_tokens": reasoning_tokens,
+                "image_tokens": 0,
+                "audio_tokens": 0,
+            },
+        },
+    }
+
+
+def _openrouter_reasoning_mandatory_error():
+    return {
+        "error": {
+            "message": "Reasoning is mandatory for this endpoint and cannot be disabled.",
+            "code": 400,
+            "metadata": {
+                "provider_name": None,
+                "previous_errors": [
+                    {
+                        "code": 400,
+                        "message": "Reasoning is mandatory for this endpoint and cannot be disabled.",
+                    }
+                ],
+            },
+        },
+        "user_id": "user_2kHrsSPEE5bxQH9UuXEB7ICTBno",
+    }
+
+
+def _openrouter_grok_region_error():
+    return {
+        "error": {
+            "message": "Provider returned error",
+            "code": 403,
+            "metadata": {
+                "raw": (
+                    '{"code":"permission-denied","error":"The model grok-4.5 '
+                    'is not available in your region."}'
+                ),
+                "provider_name": "xAI",
+                "is_byok": False,
+                "previous_errors": [
+                    {
+                        "code": 403,
+                        "message": "Provider returned error",
+                        "provider_name": "xAI",
+                        "raw": (
+                            '{"code":"permission-denied","error":"The model grok-4.5 '
+                            'is not available in your region."}'
+                        ),
+                    }
+                ],
+            },
+        },
+        "user_id": "user_2kHrsSPEE5bxQH9UuXEB7ICTBno",
+    }
+
+
+def test_recommendation_treats_openrouter_mandatory_reasoning_as_single_mode():
+    no_reasoning = _openrouter_probe_result(
+        "no-reasoning",
+        _openrouter_reasoning_mandatory_error(),
+        {"reasoning": {"enabled": False}},
+    )
+
+    assert classify_probe_result(no_reasoning) == PROBE_OUTCOME_REASONING_MANDATORY
+    assert reasoning_present(no_reasoning) is None
+
+    recommendation = recommend_configuration(
+        "x-ai/grok-4.5",
+        [
+            _openrouter_probe_result(
+                "default",
+                _grok_45_success_response(
+                    reasoning_tokens=4239,
+                    reasoning_text="The user asks for exactly ok.",
+                ),
+            ),
+            _openrouter_probe_result(
+                "reasoning",
+                _grok_45_success_response(
+                    reasoning_tokens=4933,
+                    reasoning_text="The user asks for exactly ok.",
+                ),
+                {"reasoning": {"enabled": True}},
+            ),
+            no_reasoning,
+        ],
+    )
+
+    assert recommendation["mode"] == "single_mode_reasoning_only"
+    assert recommendation["base_run_flags"] == ["--reasoning"]
+    assert recommendation["reasoning_canonical_name"] is None
+    assert "mandatory-reasoning" in recommendation["notes"]
+
+
+def test_recommendation_still_uses_effort_none_if_it_successfully_suppresses_reasoning():
+    recommendation = recommend_configuration(
+        "x-ai/grok-4.5",
+        [
+            _openrouter_probe_result(
+                "default",
+                _grok_45_success_response(
+                    reasoning_tokens=4239,
+                    reasoning_text="The user asks for exactly ok.",
+                ),
+            ),
+            _openrouter_probe_result(
+                "reasoning",
+                _grok_45_success_response(
+                    reasoning_tokens=4933,
+                    reasoning_text="The user asks for exactly ok.",
+                ),
+                {"reasoning": {"enabled": True}},
+            ),
+            _openrouter_probe_result(
+                "no-reasoning",
+                _openrouter_reasoning_mandatory_error(),
+                {"reasoning": {"enabled": False}},
+            ),
+            _openrouter_probe_result(
+                "reasoning-effort-none",
+                _grok_45_success_response(reasoning_tokens=0, reasoning_text=""),
+                {"reasoning": {"effort": "none"}},
+            ),
+        ],
+    )
+
+    assert recommendation["mode"] == "paired_modes"
+    assert recommendation["base_run_flags"] == ["--reasoning", "--reasoning-effort", "none"]
+    assert recommendation["reasoning_canonical_name"] == "x-ai/grok-4.5-reasoning"
+
+
+def test_recommendation_keeps_provider_errors_indeterminate_not_base_only():
+    provider_error_results = [
+        _openrouter_probe_result("default", _openrouter_grok_region_error()),
+        _openrouter_probe_result(
+            "reasoning",
+            _openrouter_grok_region_error(),
+            {"reasoning": {"enabled": True}},
+        ),
+    ]
+
+    assert reasoning_present(provider_error_results[0]) is None
+    assert classify_probe_result(provider_error_results[0]) == "provider_error"
+
+    recommendation = recommend_configuration("x-ai/grok-4.5", provider_error_results)
+
+    assert recommendation["mode"] == "indeterminate"
+    assert recommendation["base_run_flags"] is None
 
 
 def test_ask_overrides_accept_chat_reasoning_effort_none():

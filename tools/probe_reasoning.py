@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -34,6 +35,19 @@ logging.basicConfig(
 DEFAULT_PROMPT = (
     "Solve carefully. You have 12 coins, one is counterfeit and may be heavier or lighter. "
     "Using a balance scale exactly three times, outline a complete decision procedure."
+)
+
+PROBE_OUTCOME_REASONING = "reasoning_present"
+PROBE_OUTCOME_NO_REASONING = "no_reasoning"
+PROBE_OUTCOME_REASONING_MANDATORY = "reasoning_mandatory"
+PROBE_OUTCOME_PROVIDER_ERROR = "provider_error"
+PROBE_OUTCOME_TRANSPORT_ERROR = "transport_error"
+PROBE_OUTCOME_MISSING_SUMMARY = "missing_summary"
+
+REASONING_MANDATORY_RE = re.compile(
+    r"(reasoning|thinking).*(mandatory|required|cannot be disabled|can't be disabled)|"
+    r"(mandatory|required|cannot be disabled|can't be disabled).*(reasoning|thinking)",
+    re.IGNORECASE,
 )
 
 
@@ -156,12 +170,44 @@ def run_probe(
 def reasoning_present(result: Optional[Dict[str, Any]]) -> Optional[bool]:
     if not result:
         return None
-    if result.get("error"):
+    if probe_error_text(result):
         return None
     summary = result.get("summary")
     if not isinstance(summary, dict):
         return None
     return bool(summary.get("reasoning_present"))
+
+
+def probe_error_text(result: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not result:
+        return None
+    error = result.get("error")
+    if error:
+        return str(error)
+    summary = result.get("summary")
+    if isinstance(summary, dict) and summary.get("error"):
+        return str(summary["error"])
+    if result.get("raw_response_format") == "openrouter.error":
+        return "openrouter.error"
+    return None
+
+
+def classify_probe_result(result: Optional[Dict[str, Any]]) -> str:
+    if not result:
+        return PROBE_OUTCOME_MISSING_SUMMARY
+    error_text = probe_error_text(result)
+    if error_text:
+        if REASONING_MANDATORY_RE.search(error_text):
+            return PROBE_OUTCOME_REASONING_MANDATORY
+        if result.get("error"):
+            return PROBE_OUTCOME_TRANSPORT_ERROR
+        return PROBE_OUTCOME_PROVIDER_ERROR
+    present = reasoning_present(result)
+    if present is True:
+        return PROBE_OUTCOME_REASONING
+    if present is False:
+        return PROBE_OUTCOME_NO_REASONING
+    return PROBE_OUTCOME_MISSING_SUMMARY
 
 
 def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -191,6 +237,7 @@ def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) 
     )
     reasoning_present_verbosity_max = reasoning_present(by_probe.get("reasoning-verbosity-max"))
     no_reasoning_present = reasoning_present(by_probe.get("no-reasoning"))
+    no_reasoning_outcome = classify_probe_result(by_probe.get("no-reasoning"))
 
     reasoning_probe = None
     reasoning_flags: Optional[List[str]] = None
@@ -354,6 +401,19 @@ def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) 
         )
         return recommendation
 
+    if default_present is True and no_reasoning_outcome == PROBE_OUTCOME_REASONING_MANDATORY:
+        recommendation.update(
+            {
+                "mode": "single_mode_reasoning_only",
+                "base_run_flags": reasoning_flags or ["--reasoning"],
+                "notes": (
+                    "Default responses include reasoning traces, and the provider rejects attempts "
+                    "to disable reasoning. Treat this as a mandatory-reasoning single mode."
+                ),
+            }
+        )
+        return recommendation
+
     if default_present is False and reasoning_flags is None:
         recommendation.update(
             {
@@ -370,6 +430,22 @@ def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) 
                 "mode": "single_mode_reasoning_only",
                 "base_run_flags": ["--reasoning"],
                 "notes": "Reasoning traces were present in default and explicit --no-reasoning probes, so the provider appears to expose only one reasoning-like mode.",
+            }
+        )
+        return recommendation
+
+    if default_present is True and no_reasoning_outcome in {
+        PROBE_OUTCOME_PROVIDER_ERROR,
+        PROBE_OUTCOME_TRANSPORT_ERROR,
+        PROBE_OUTCOME_MISSING_SUMMARY,
+    }:
+        recommendation.update(
+            {
+                "notes": (
+                    "Default responses include reasoning traces, but the no-reasoning probe did not "
+                    "produce a usable success response. Classify the error shape before deciding "
+                    "whether a separate non-reasoning mode exists."
+                ),
             }
         )
         return recommendation
@@ -391,14 +467,17 @@ def print_human_report(
     print(f"prompt={prompt!r}")
     for result in results:
         probe = result["probe"]
+        outcome = classify_probe_result(result)
         if result.get("error"):
-            print(f"probe={probe} error={result['error']}")
+            print(f"probe={probe} outcome={outcome} error={result['error']}")
             continue
         summary = result["summary"]
+        error_text = probe_error_text(result)
         print(
             "probe={probe} request_format={request_format} raw_response_format={raw_response_format} "
             "reasoning_present={reasoning_present} reasoning_tokens={reasoning_tokens} "
-            "provider={provider} response_model={response_model} finish_reason={finish_reason}".format(
+            "provider={provider} response_model={response_model} finish_reason={finish_reason} "
+            "outcome={outcome}{error_suffix}".format(
                 probe=probe,
                 request_format=result.get("request_format"),
                 raw_response_format=result.get("raw_response_format"),
@@ -407,6 +486,8 @@ def print_human_report(
                 provider=summary.get("provider"),
                 response_model=summary.get("response_model"),
                 finish_reason=summary.get("finish_reason"),
+                outcome=outcome,
+                error_suffix=f" error={error_text}" if error_text else "",
             )
         )
     print(f"recommendation_mode={recommendation['mode']}")
