@@ -245,3 +245,4 @@
 {"canonical_name": "anthropic/claude-sonnet-5", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-sonnet-5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}}}
 {"canonical_name": "anthropic/claude-sonnet-5-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "anthropic/claude-sonnet-5", "priority": 0}], "request_overrides": {"thinking": {"type": "adaptive"}, "output_config": {"effort": "max"}, "request_format": "anthropic_messages", "max_tokens": 20000}}
 {"canonical_name": "poolside/laguna-xs-2.1", "providers": [{"provider_name": "openrouter", "provider_model_id": "poolside/laguna-xs-2.1:free", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}, "max_tokens": 16000}}
+{"canonical_name": "x-ai/grok-4.5", "providers": [{"provider_name": "openrouter", "provider_model_id": "x-ai/grok-4.5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}}}
