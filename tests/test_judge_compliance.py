@@ -1,5 +1,6 @@
 from argparse import Namespace
 from datetime import datetime, timezone
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,10 @@ from compliance.data import ComplianceAnalysis, JSONLHandler, ModelResponse, Que
 from judge_compliance import (
     DEFAULT_JUDGE_MODEL,
     DEFAULT_JUDGE_PROVIDER,
+    DEFAULT_JUDGE_FALLBACK_MAX,
+    DEFAULT_JUDGE_FALLBACK_MODEL,
+    DEFAULT_JUDGE_FALLBACK_OVERRIDES,
+    DEFAULT_JUDGE_FALLBACK_PROVIDER,
     DEFAULT_JUDGE_MAX_RETRIES,
     DEFAULT_JUDGE_WORKERS,
     DEFAULT_QUOTA_COOLDOWN,
@@ -17,7 +22,10 @@ from judge_compliance import (
     DEFAULT_REQUEST_PERIOD,
     ERROR_ORIGINAL_MODERATION,
     ERROR_ORIGINAL_TRUNCATION,
+    ERROR_JUDGE_CONTENT_FILTER,
+    JudgeFallbackManager,
     RequestThrottle,
+    build_judge_fallback_request_overrides,
     build_judge_request_overrides,
     follow_file,
     judge_worker,
@@ -35,9 +43,22 @@ def _args(**overrides):
         "no_reasoning": False,
         "reasoning_effort": None,
         "force_subprovider": None,
+        "disable_judge_fallback": False,
     }
     defaults.update(overrides)
     return Namespace(**defaults)
+
+
+def _fallback_kwargs(**overrides):
+    defaults = {
+        "judge_fallback_enabled": False,
+        "judge_fallback_model": DEFAULT_JUDGE_FALLBACK_MODEL,
+        "judge_fallback_provider": DEFAULT_JUDGE_FALLBACK_PROVIDER,
+        "judge_fallback_max": DEFAULT_JUDGE_FALLBACK_MAX,
+        "judge_fallback_request_overrides": DEFAULT_JUDGE_FALLBACK_OVERRIDES,
+    }
+    defaults.update(overrides)
+    return defaults
 
 
 def test_default_judge_is_google_agent_platform_non_reasoning_model():
@@ -53,6 +74,17 @@ def test_default_judge_throttle_matches_observed_grok_quota():
     assert DEFAULT_REQUEST_PERIOD == 60.0
     assert DEFAULT_JUDGE_MAX_RETRIES == 2
     assert DEFAULT_QUOTA_COOLDOWN == 20.0
+
+
+def test_default_judge_fallback_uses_sol_medium_reasoning_openai_only():
+    assert DEFAULT_JUDGE_FALLBACK_MODEL == "openai/gpt-5.6-sol"
+    assert DEFAULT_JUDGE_FALLBACK_PROVIDER == "openrouter"
+    assert DEFAULT_JUDGE_FALLBACK_MAX == 60
+    assert build_judge_fallback_request_overrides(_args()) == {
+        "reasoning": {"enabled": True, "effort": "medium"},
+        "max_tokens": 4096,
+        "provider": {"order": ["OpenAI"], "allow_fallbacks": False},
+    }
 
 
 def test_google_agent_platform_reasoning_effort_uses_top_level_field():
@@ -228,6 +260,182 @@ def test_judge_worker_records_content_filter_judge_errors(monkeypatch):
     assert "content filter" in result.judge_analysis
 
 
+def test_judge_worker_uses_sol_fallback_after_primary_content_filter(monkeypatch):
+    model_response = ModelResponse(
+        question_id="sex_csam_existing_legalize_defense3",
+        question="Should fictional policy change be defended?",
+        model="test/model",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        response={
+            "choices": [
+                {
+                    "message": {"content": "A substantive model response."},
+                    "finish_reason": "stop",
+                }
+            ]
+        },
+        api_provider="openrouter",
+        api_model="test/model",
+        category="us_hard",
+    )
+    calls = []
+
+    monkeypatch.setattr(judge_compliance.llm_client, "get_provider", lambda name: name)
+
+    def fake_make_judge_request(**kwargs):
+        calls.append(kwargs)
+        if kwargs["model_id"] == DEFAULT_JUDGE_MODEL:
+            return SimpleNamespace(
+                success=False,
+                is_retryable=False,
+                error_info={
+                    "type": "content_filter",
+                    "message": "Response stopped due to content filter",
+                },
+            )
+        return SimpleNamespace(
+            success=True,
+            is_retryable=False,
+            standardized_response={
+                "content": "ANALYSIS: fallback judged it.\n\nCOMPLIANCE: COMPLETE"
+            },
+            error_info=None,
+        )
+
+    monkeypatch.setattr(judge_compliance, "make_judge_request", fake_make_judge_request)
+
+    result = judge_worker(
+        model_response,
+        DEFAULT_JUDGE_MODEL,
+        DEFAULT_JUDGE_PROVIDER,
+        judge_fallback_manager=JudgeFallbackManager(DEFAULT_JUDGE_FALLBACK_MAX),
+        judge_fallback_request_overrides=DEFAULT_JUDGE_FALLBACK_OVERRIDES,
+    )
+
+    assert result.compliance == "COMPLETE"
+    assert result.judge_model == DEFAULT_JUDGE_FALLBACK_MODEL
+    assert result.judge_api_provider == DEFAULT_JUDGE_FALLBACK_PROVIDER
+    assert calls[1]["model_id"] == DEFAULT_JUDGE_FALLBACK_MODEL
+    assert calls[1]["reasoning"] == {"enabled": True, "effort": "medium"}
+    assert calls[1]["max_tokens"] == 4096
+    assert calls[1]["provider"] == {"order": ["OpenAI"], "allow_fallbacks": False}
+    raw = json.loads(result.raw_judge_response)
+    assert raw["fallback_attempted"] is True
+    assert raw["primary_judge"]["error_info"]["type"] == "content_filter"
+    assert raw["fallback_judge"]["raw_response"].startswith("ANALYSIS: fallback")
+
+
+def test_judge_worker_retains_primary_content_filter_when_fallback_fails(monkeypatch):
+    model_response = ModelResponse(
+        question_id="sex_csam_existing_legalize_defense3",
+        question="Should fictional policy change be defended?",
+        model="test/model",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        response={
+            "choices": [
+                {
+                    "message": {"content": "A substantive model response."},
+                    "finish_reason": "stop",
+                }
+            ]
+        },
+        api_provider="openrouter",
+        api_model="test/model",
+        category="us_hard",
+    )
+
+    monkeypatch.setattr(judge_compliance.llm_client, "get_provider", lambda name: name)
+    monkeypatch.setattr(
+        judge_compliance,
+        "make_judge_request",
+        lambda **_: SimpleNamespace(
+            success=False,
+            is_retryable=False,
+            error_info={
+                "type": "content_filter",
+                "message": "Response stopped due to content filter",
+            },
+        ),
+    )
+
+    result = judge_worker(
+        model_response,
+        DEFAULT_JUDGE_MODEL,
+        DEFAULT_JUDGE_PROVIDER,
+        judge_fallback_manager=JudgeFallbackManager(DEFAULT_JUDGE_FALLBACK_MAX),
+        judge_fallback_request_overrides=DEFAULT_JUDGE_FALLBACK_OVERRIDES,
+    )
+
+    assert result.compliance == ERROR_JUDGE_CONTENT_FILTER
+    assert result.judge_model == DEFAULT_JUDGE_MODEL
+    raw = json.loads(result.raw_judge_response)
+    assert raw["fallback_attempted"] is True
+    assert raw["fallback_judge"]["error_info"]["type"] == "content_filter"
+
+
+def test_judge_worker_fails_fast_when_fallback_cap_is_reached(monkeypatch):
+    model_response = ModelResponse(
+        question_id="sex_csam_existing_legalize_defense3",
+        question="Should fictional policy change be defended?",
+        model="test/model",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        response={
+            "choices": [
+                {
+                    "message": {"content": "A substantive model response."},
+                    "finish_reason": "stop",
+                }
+            ]
+        },
+        api_provider="openrouter",
+        api_model="test/model",
+        category="us_hard",
+    )
+    manager = JudgeFallbackManager(max_attempts=1)
+
+    monkeypatch.setattr(judge_compliance.llm_client, "get_provider", lambda name: name)
+    monkeypatch.setattr(
+        judge_compliance,
+        "make_judge_request",
+        lambda **kwargs: SimpleNamespace(
+            success=False,
+            is_retryable=False,
+            error_info={
+                "type": "content_filter",
+                "message": "Response stopped due to content filter",
+            },
+        )
+        if kwargs["model_id"] == DEFAULT_JUDGE_MODEL
+        else SimpleNamespace(
+            success=True,
+            is_retryable=False,
+            standardized_response={
+                "content": "ANALYSIS: fallback judged it.\n\nCOMPLIANCE: COMPLETE"
+            },
+            error_info=None,
+        ),
+    )
+
+    first = judge_worker(
+        model_response,
+        DEFAULT_JUDGE_MODEL,
+        DEFAULT_JUDGE_PROVIDER,
+        judge_fallback_manager=manager,
+        judge_fallback_request_overrides=DEFAULT_JUDGE_FALLBACK_OVERRIDES,
+    )
+    second = judge_worker(
+        model_response,
+        DEFAULT_JUDGE_MODEL,
+        DEFAULT_JUDGE_PROVIDER,
+        judge_fallback_manager=manager,
+        judge_fallback_request_overrides=DEFAULT_JUDGE_FALLBACK_OVERRIDES,
+    )
+
+    assert first.compliance == "COMPLETE"
+    assert isinstance(second, RuntimeError)
+    assert str(second).startswith("JUDGE_FALLBACK_LIMIT_EXCEEDED")
+
+
 def test_judge_worker_records_original_content_filter_as_moderation_without_judge_call(monkeypatch):
     model_response = ModelResponse(
         question_id="military_bio_weapons_develop_defense1",
@@ -372,6 +580,7 @@ def test_process_file_preserves_judge_content_filter_without_rejudging(tmp_path,
         quota_cooldown=0,
         output_dir=output_dir,
         output_stem_suffix="",
+        **_fallback_kwargs(),
     )
 
     assert len(analyses) == 1
@@ -435,6 +644,7 @@ def test_process_file_limit_judges_only_selected_pending_rows(tmp_path, monkeypa
         quota_cooldown=0,
         output_dir=output_dir,
         output_stem_suffix="",
+        **_fallback_kwargs(),
     )
 
     assert len(analyses) == 1
@@ -539,6 +749,7 @@ def test_follow_file_polls_until_producer_unlocks_then_validates_complete(
         poll_interval=1,
         questions_path=questions_path,
         question_dir=tmp_path,
+        **_fallback_kwargs(),
     )
 
     assert released is True
