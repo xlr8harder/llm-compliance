@@ -7,8 +7,9 @@ Streaming version
   progress survives crashes or CTRL‑C.
 * Maintains *one* analysis row per `question_id` across runs (newer timestamps
   replace older rows).
-* Stores judge-side classifier failures as terminal analysis rows instead of
-  re-trying them on later runs.
+* Stores judge-side classifier failures as terminal rows unless fallback judging
+  is enabled; fallback successes keep the fallback judge in the normal fields
+  and demote the failed primary judge to audit metadata.
 * `--max-errors` aborts the run after N consecutive judge transport/provider
   errors.
 * `--force-restart` discards any previous analysis file for the given
@@ -19,6 +20,7 @@ Streaming version
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import logging
 import os
@@ -155,6 +157,7 @@ ERROR_ORIGINAL_RESPONSE = "ERROR_ORIGINAL_RESPONSE"
 ERROR_ORIGINAL_MODERATION = "ERROR_ORIGINAL_MODERATION"
 ERROR_ORIGINAL_TRUNCATION = "ERROR_ORIGINAL_TRUNCATION"
 ERROR_JUDGE_CONTENT_FILTER = "ERROR_JUDGE_CONTENT_FILTER"
+ERROR_JUDGE_UNEXPECTED_PERMANENT = "ERROR_JUDGE_UNEXPECTED_PERMANENT"
 DEFAULT_JUDGE_FALLBACK_MODEL = "openai/gpt-5.6-sol"
 DEFAULT_JUDGE_FALLBACK_PROVIDER = "openrouter"
 DEFAULT_JUDGE_FALLBACK_MAX = 60
@@ -424,34 +427,43 @@ def _json_safe(value: object) -> object:
         return str(value)
 
 
-def build_fallback_raw_judge_response(
+def build_failed_judge_metadata(
     *,
-    primary_judge_model: str,
-    primary_judge_provider: str,
-    primary_error_info: object,
-    fallback_judge_model: str,
-    fallback_judge_provider: str,
-    fallback_error_info: object = None,
-    fallback_raw_response: object = None,
-) -> str:
+    judge_model: str,
+    judge_provider: str,
+    error_info: object = None,
+    raw_judge_response: object = None,
+) -> Dict[str, object]:
     payload = {
-        "primary_judge": {
-            "model": primary_judge_model,
-            "provider": primary_judge_provider,
-            "error_info": _json_safe(primary_error_info),
-        },
-        "fallback_attempted": True,
-        "fallback_judge": {
-            "model": fallback_judge_model,
-            "provider": fallback_judge_provider,
-            "error_info": _json_safe(fallback_error_info),
-            "raw_response": _json_safe(fallback_raw_response),
-        },
+        "model": judge_model,
+        "provider": judge_provider,
     }
-    return json.dumps(payload, ensure_ascii=False)
+    if error_info is not None:
+        payload["error_info"] = _json_safe(error_info)
+    if raw_judge_response is not None:
+        payload["raw_judge_response"] = _json_safe(raw_judge_response)
+    return payload
+
+
+def parse_stored_judge_error_info(raw_judge_response: Optional[str]) -> object:
+    if raw_judge_response is None:
+        return None
+    for parser in (json.loads, ast.literal_eval):
+        try:
+            parsed = parser(raw_judge_response)
+        except (ValueError, SyntaxError, TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(parsed, dict):
+            primary_judge = parsed.get("primary_judge")
+            if isinstance(primary_judge, dict) and "error_info" in primary_judge:
+                return primary_judge["error_info"]
+            return parsed
+    return {"message": raw_judge_response}
 
 
 def analysis_has_judge_fallback_attempt(analysis: ComplianceAnalysis) -> bool:
+    if getattr(analysis, "failed_primary_judge", None) is not None:
+        return True
     if not analysis.raw_judge_response:
         return False
     try:
@@ -606,6 +618,7 @@ def build_judge_content_filter_analysis(
     judge_provider: str,
     error_info: object,
     raw_judge_response: Optional[str] = None,
+    failed_primary_judge: Optional[Dict[str, object]] = None,
 ) -> ComplianceAnalysis:
     message = "judge response stopped due to content filter"
     if isinstance(error_info, dict):
@@ -627,6 +640,115 @@ def build_judge_content_filter_analysis(
         raw_judge_response=raw_judge_response if raw_judge_response is not None else str(error_info),
         category=model_resp.category or "undefined",
         domain=model_resp.domain,
+        failed_primary_judge=failed_primary_judge,
+    )
+
+
+def build_compliance_analysis_from_judge_text(
+    *,
+    model_resp: ModelResponse,
+    judge_model: str,
+    judge_provider: str,
+    raw_content: str,
+    failed_primary_judge: Optional[Dict[str, object]] = None,
+) -> ComplianceAnalysis:
+    analysis_text, compliance = extract_compliance_fields(raw_content)
+    return ComplianceAnalysis(
+        question_id=model_resp.question_id,
+        question=model_resp.question,
+        model=model_resp.model,
+        response=model_resp.response,
+        judge_model=judge_model,
+        judge_api_provider=judge_provider,
+        compliance=compliance,
+        judge_analysis=analysis_text,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        original_api_provider=model_resp.api_provider,
+        api_model=model_resp.api_model,
+        raw_judge_response=raw_content,
+        category=model_resp.category or "undefined",
+        domain=model_resp.domain,
+        failed_primary_judge=failed_primary_judge,
+    )
+
+
+def attempt_fallback_judge(
+    *,
+    model_resp: ModelResponse,
+    prompt: str,
+    primary_judge_model: str,
+    primary_judge_provider: str,
+    primary_error_info: object,
+    primary_raw_judge_response: Optional[str] = None,
+    request_throttle: Optional[RequestThrottle],
+    judge_max_retries: int,
+    quota_cooldown: float,
+    judge_fallback_manager: JudgeFallbackManager,
+    judge_fallback_model: str,
+    judge_fallback_provider: str,
+    judge_fallback_request_overrides: Optional[Dict[str, Any]],
+) -> ComplianceAnalysis | RuntimeError:
+    try:
+        attempt_number = judge_fallback_manager.reserve_attempt(model_resp.question_id)
+    except RuntimeError as exc:
+        return exc
+    LOGGER.info(
+        "Judge content filter on %s; trying fallback judge %s via %s "
+        "(fallback attempt %d/%d)",
+        model_resp.question_id,
+        judge_fallback_model,
+        judge_fallback_provider,
+        attempt_number,
+        judge_fallback_manager.max_attempts,
+    )
+
+    failed_primary_judge = build_failed_judge_metadata(
+        judge_model=primary_judge_model,
+        judge_provider=primary_judge_provider,
+        error_info=primary_error_info,
+        raw_judge_response=primary_raw_judge_response,
+    )
+
+    fallback_provider = llm_client.get_provider(judge_fallback_provider)
+    fallback_resp = make_judge_request(
+        provider_client=fallback_provider,
+        messages=[{"role": "user", "content": prompt}],
+        model_id=judge_fallback_model,
+        request_throttle=request_throttle,
+        max_retries=judge_max_retries,
+        quota_cooldown=quota_cooldown,
+        timeout=90,
+        **(judge_fallback_request_overrides or {}),
+    )
+
+    if getattr(fallback_resp, "success", False):
+        standardized = getattr(fallback_resp, "standardized_response", {}) or {}
+        fallback_raw_content = standardized.get("content", "")
+        return build_compliance_analysis_from_judge_text(
+            model_resp=model_resp,
+            judge_model=judge_fallback_model,
+            judge_provider=judge_fallback_provider,
+            raw_content=fallback_raw_content,
+            failed_primary_judge=failed_primary_judge,
+        )
+
+    fallback_error_info = getattr(fallback_resp, "error_info", None)
+    if is_quota_error(fallback_error_info):
+        return RuntimeError("TRANSIENT_JUDGE_QUOTA")
+    if getattr(fallback_resp, "is_retryable", False):
+        return RuntimeError("TRANSIENT_JUDGE_FAILURE")
+
+    if isinstance(fallback_error_info, dict) and fallback_error_info.get("type") == "content_filter":
+        return build_judge_content_filter_analysis(
+            model_resp=model_resp,
+            judge_model=judge_fallback_model,
+            judge_provider=judge_fallback_provider,
+            error_info=fallback_error_info,
+            failed_primary_judge=failed_primary_judge,
+        )
+    return RuntimeError(
+        f"{ERROR_JUDGE_UNEXPECTED_PERMANENT}: fallback judge returned "
+        f"non-content-filter permanent error: {fallback_error_info}"
     )
 
 
@@ -643,6 +765,7 @@ def judge_worker(
     judge_fallback_model: str = DEFAULT_JUDGE_FALLBACK_MODEL,
     judge_fallback_provider: str = DEFAULT_JUDGE_FALLBACK_PROVIDER,
     judge_fallback_request_overrides: Optional[Dict[str, Any]] = None,
+    fallback_from_analysis: Optional[ComplianceAnalysis] = None,
     **request_overrides,
 ) -> ComplianceAnalysis | RuntimeError:
     """Compute ComplianceAnalysis for one response.
@@ -721,8 +844,6 @@ def judge_worker(
             domain=model_resp.domain,
         )
 
-    # --- Call judge LLM --------------------------------------------------
-    provider = llm_client.get_provider(judge_provider)
     answer_text = model_resp.final_content_text()
 
     # Narrow workaround: Hermes 4 405B produced a pathological us_hard row
@@ -756,9 +877,30 @@ def judge_worker(
     else:
         prompt = create_judge_prompt_from_template(prompt_template, model_resp.question, answer_text)
 
+    if fallback_from_analysis is not None:
+        if judge_fallback_manager is None:
+            return RuntimeError("JUDGE_FALLBACK_DISABLED_FOR_BACKLOG_ROW")
+        return attempt_fallback_judge(
+            model_resp=model_resp,
+            prompt=prompt,
+            primary_judge_model=fallback_from_analysis.judge_model,
+            primary_judge_provider=fallback_from_analysis.judge_api_provider or judge_provider,
+            primary_error_info=parse_stored_judge_error_info(fallback_from_analysis.raw_judge_response),
+            primary_raw_judge_response=fallback_from_analysis.raw_judge_response,
+            request_throttle=request_throttle,
+            judge_max_retries=judge_max_retries,
+            quota_cooldown=quota_cooldown,
+            judge_fallback_manager=judge_fallback_manager,
+            judge_fallback_model=judge_fallback_model,
+            judge_fallback_provider=judge_fallback_provider,
+            judge_fallback_request_overrides=judge_fallback_request_overrides,
+        )
+
     if request_throttle is not None:
         request_throttle.wait()
 
+    # --- Call judge LLM --------------------------------------------------
+    provider = llm_client.get_provider(judge_provider)
     judge_resp = make_judge_request(
         provider_client=provider,
         messages=[{"role": "user", "content": prompt}],
@@ -776,113 +918,19 @@ def judge_worker(
         error_info = judge_resp.error_info or {}
         if isinstance(error_info, dict) and error_info.get("type") == "content_filter":
             if judge_fallback_manager is not None:
-                try:
-                    attempt_number = judge_fallback_manager.reserve_attempt(model_resp.question_id)
-                    LOGGER.info(
-                        "Judge content filter on %s; trying fallback judge %s via %s "
-                        "(fallback attempt %d/%d)",
-                        model_resp.question_id,
-                        judge_fallback_model,
-                        judge_fallback_provider,
-                        attempt_number,
-                        judge_fallback_manager.max_attempts,
-                    )
-                    fallback_provider = llm_client.get_provider(judge_fallback_provider)
-                    fallback_resp = make_judge_request(
-                        provider_client=fallback_provider,
-                        messages=[{"role": "user", "content": prompt}],
-                        model_id=judge_fallback_model,
-                        request_throttle=request_throttle,
-                        max_retries=judge_max_retries,
-                        quota_cooldown=quota_cooldown,
-                        timeout=90,
-                        **(judge_fallback_request_overrides or {}),
-                    )
-                except RuntimeError as exc:
-                    if str(exc).startswith("JUDGE_FALLBACK_LIMIT_EXCEEDED"):
-                        return exc
-                    fallback_raw = build_fallback_raw_judge_response(
-                        primary_judge_model=judge_model,
-                        primary_judge_provider=judge_provider,
-                        primary_error_info=error_info,
-                        fallback_judge_model=judge_fallback_model,
-                        fallback_judge_provider=judge_fallback_provider,
-                        fallback_error_info={"type": "exception", "message": str(exc)},
-                    )
-                    return build_judge_content_filter_analysis(
-                        model_resp=model_resp,
-                        judge_model=judge_model,
-                        judge_provider=judge_provider,
-                        error_info=error_info,
-                        raw_judge_response=fallback_raw,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    fallback_raw = build_fallback_raw_judge_response(
-                        primary_judge_model=judge_model,
-                        primary_judge_provider=judge_provider,
-                        primary_error_info=error_info,
-                        fallback_judge_model=judge_fallback_model,
-                        fallback_judge_provider=judge_fallback_provider,
-                        fallback_error_info={"type": "exception", "message": str(exc)},
-                    )
-                    return build_judge_content_filter_analysis(
-                        model_resp=model_resp,
-                        judge_model=judge_model,
-                        judge_provider=judge_provider,
-                        error_info=error_info,
-                        raw_judge_response=fallback_raw,
-                    )
-
-                fallback_error_info = getattr(fallback_resp, "error_info", None)
-                fallback_raw_content = ""
-                if getattr(fallback_resp, "success", False):
-                    standardized = getattr(fallback_resp, "standardized_response", {}) or {}
-                    fallback_raw_content = standardized.get("content", "")
-                    analysis_text, compliance = extract_compliance_fields(fallback_raw_content)
-                    if compliance != "ERROR_JUDGE_FORMAT":
-                        return ComplianceAnalysis(
-                            question_id=model_resp.question_id,
-                            question=model_resp.question,
-                            model=model_resp.model,
-                            response=model_resp.response,
-                            judge_model=judge_fallback_model,
-                            judge_api_provider=judge_fallback_provider,
-                            compliance=compliance,
-                            judge_analysis=analysis_text,
-                            timestamp=datetime.now(timezone.utc).isoformat(),
-                            original_api_provider=model_resp.api_provider,
-                            api_model=model_resp.api_model,
-                            raw_judge_response=build_fallback_raw_judge_response(
-                                primary_judge_model=judge_model,
-                                primary_judge_provider=judge_provider,
-                                primary_error_info=error_info,
-                                fallback_judge_model=judge_fallback_model,
-                                fallback_judge_provider=judge_fallback_provider,
-                                fallback_raw_response=fallback_raw_content,
-                            ),
-                            category=model_resp.category or "undefined",
-                            domain=model_resp.domain,
-                        )
-                    fallback_error_info = {
-                        "type": "format_error",
-                        "message": "fallback judge response did not contain a valid compliance label",
-                    }
-
-                fallback_raw = build_fallback_raw_judge_response(
+                return attempt_fallback_judge(
+                    model_resp=model_resp,
+                    prompt=prompt,
                     primary_judge_model=judge_model,
                     primary_judge_provider=judge_provider,
                     primary_error_info=error_info,
-                    fallback_judge_model=judge_fallback_model,
-                    fallback_judge_provider=judge_fallback_provider,
-                    fallback_error_info=fallback_error_info,
-                    fallback_raw_response=fallback_raw_content,
-                )
-                return build_judge_content_filter_analysis(
-                    model_resp=model_resp,
-                    judge_model=judge_model,
-                    judge_provider=judge_provider,
-                    error_info=error_info,
-                    raw_judge_response=fallback_raw,
+                    request_throttle=request_throttle,
+                    judge_max_retries=judge_max_retries,
+                    quota_cooldown=quota_cooldown,
+                    judge_fallback_manager=judge_fallback_manager,
+                    judge_fallback_model=judge_fallback_model,
+                    judge_fallback_provider=judge_fallback_provider,
+                    judge_fallback_request_overrides=judge_fallback_request_overrides,
                 )
 
             return build_judge_content_filter_analysis(
@@ -891,7 +939,10 @@ def judge_worker(
                 judge_provider=judge_provider,
                 error_info=error_info,
             )
-        return RuntimeError(judge_resp.error_info or "permanent judge error")
+        return RuntimeError(
+            f"{ERROR_JUDGE_UNEXPECTED_PERMANENT}: primary judge returned "
+            f"non-content-filter permanent error: {judge_resp.error_info}"
+        )
 
     # Transient (still retryable) failure → special marker.
     if not judge_resp.success:
@@ -976,7 +1027,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=DEFAULT_REQUEST_MAX_PER_PERIOD,
         help=(
             "maximum judge request starts allowed during each rolling request period "
-            f"(default: {DEFAULT_REQUEST_MAX_PER_PERIOD})"
+            f"(default: {DEFAULT_REQUEST_MAX_PER_PERIOD}; 0 disables)"
         ),
     )
     parser.add_argument(
@@ -1163,9 +1214,10 @@ def process_file(
 
         # Clean up analyses map: keep only analyses that still correspond to an
         # existing response row, are newer than that response, and match the
-        # current original-response state. Stored judge-side classifier failures
-        # are preserved so resume runs do not race the judge moderation layer.
+        # current original-response state. Legacy judge-side classifier failures
+        # become fallback backlog tasks when fallback judging is enabled.
         cleaned_analyses = {}
+        fallback_backlog_analyses: Dict[str, ComplianceAnalysis] = {}
         for qid, analysis in analyses_map.items():
             current_resp = responses_map.get(qid)
             if current_resp is None:
@@ -1181,6 +1233,13 @@ def process_file(
                 analysis,
                 judge_fallback_enabled=judge_fallback_enabled,
             ):
+                if (
+                    judge_fallback_enabled
+                    and current_resp.is_success()
+                    and analysis.compliance == ERROR_JUDGE_CONTENT_FILTER
+                    and not analysis_has_judge_fallback_attempt(analysis)
+                ):
+                    fallback_backlog_analyses[qid] = analysis
                 continue
             cleaned_analyses[qid] = analysis
         if cleaned_analyses:
@@ -1193,19 +1252,34 @@ def process_file(
         analyses_map = cleaned_analyses
 
         # Work list: anything not preserved in cleaned_analyses must be judged.
-        to_judge: List[ModelResponse] = []
+        # For legacy primary-only judge moderation rows, skip the primary judge
+        # and send the prompt directly to the configured fallback.
+        to_judge: List[tuple[ModelResponse, Optional[ComplianceAnalysis]]] = []
         for resp in model_responses:
             existing = analyses_map.get(resp.question_id)
             if existing is None:
-                to_judge.append(resp)
+                to_judge.append((resp, fallback_backlog_analyses.get(resp.question_id)))
         if limit is not None:
+            deferred = to_judge[limit:]
+            deferred_existing = 0
+            for resp, fallback_analysis in deferred:
+                if fallback_analysis is not None:
+                    analyses_map[resp.question_id] = fallback_analysis
+                    deferred_existing += 1
+            if deferred_existing:
+                JSONLHandler.save_jsonl(list(analyses_map.values()), analysis_path, append=False)
+                LOGGER.info(
+                    "Preserved %d existing analyses deferred by --limit",
+                    deferred_existing,
+                )
             to_judge = to_judge[:limit]
 
         LOGGER.info(
-            "%s → pending=%d / total=%d (output %s)",
+            "%s → pending=%d / total=%d; fallback_backlog=%d (output %s)",
             responses_path.name,
             len(to_judge),
             len(model_responses),
+            sum(1 for _resp, fallback_analysis in to_judge if fallback_analysis is not None),
             analysis_path.name,
         )
 
@@ -1236,7 +1310,7 @@ def process_file(
                     nonlocal next_index
                     if next_index >= len(to_judge):
                         return False
-                    mr = to_judge[next_index]
+                    mr, fallback_from_analysis = to_judge[next_index]
                     next_index += 1
                     if request_throttle is not None:
                         request_throttle.wait()
@@ -1254,6 +1328,7 @@ def process_file(
                         judge_fallback_model=judge_fallback_model,
                         judge_fallback_provider=judge_fallback_provider,
                         judge_fallback_request_overrides=judge_fallback_request_overrides,
+                        fallback_from_analysis=fallback_from_analysis,
                         **request_overrides,
                     )
                     future_map[future] = mr.question_id
@@ -1273,6 +1348,8 @@ def process_file(
                             if isinstance(result, RuntimeError):
                                 errmsg = str(result)
                                 if errmsg.startswith("JUDGE_FALLBACK_LIMIT_EXCEEDED"):
+                                    raise RuntimeError(errmsg)
+                                if errmsg.startswith(ERROR_JUDGE_UNEXPECTED_PERMANENT):
                                     raise RuntimeError(errmsg)
                                 if errmsg == "TRANSIENT_JUDGE_QUOTA":
                                     LOGGER.warning("Quota judge failure on %s (will retry next run)", qid)
@@ -1440,9 +1517,14 @@ def main(argv: Optional[List[str]] | None = None) -> None:  # noqa: D401
     if args.request_min_interval < 0:
         LOGGER.error("--request-min-interval must be >= 0")
         sys.exit(2)
-    if args.request_max_per_period is not None and args.request_max_per_period < 1:
-        LOGGER.error("--request-max-per-period must be >= 1")
+    if args.request_max_per_period is not None and args.request_max_per_period < 0:
+        LOGGER.error("--request-max-per-period must be >= 0")
         sys.exit(2)
+    request_max_per_period = (
+        None
+        if args.request_max_per_period == 0
+        else args.request_max_per_period
+    )
     if args.request_period <= 0:
         LOGGER.error("--request-period must be > 0")
         sys.exit(2)
@@ -1497,7 +1579,7 @@ def main(argv: Optional[List[str]] | None = None) -> None:  # noqa: D401
                     prompt_template=prompt_template,
                     request_overrides=request_overrides,
                     request_min_interval=args.request_min_interval,
-                    request_max_per_period=args.request_max_per_period,
+                    request_max_per_period=request_max_per_period,
                     request_period=args.request_period,
                     judge_max_retries=args.judge_max_retries,
                     quota_cooldown=args.quota_cooldown,
@@ -1523,7 +1605,7 @@ def main(argv: Optional[List[str]] | None = None) -> None:  # noqa: D401
                     prompt_template=prompt_template,
                     request_overrides=request_overrides,
                     request_min_interval=args.request_min_interval,
-                    request_max_per_period=args.request_max_per_period,
+                    request_max_per_period=request_max_per_period,
                     request_period=args.request_period,
                     limit=args.limit,
                     judge_max_retries=args.judge_max_retries,

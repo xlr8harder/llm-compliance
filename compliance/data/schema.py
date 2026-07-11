@@ -587,6 +587,7 @@ class ComplianceAnalysis:
     domain: Optional[str] = None
     api_model: Optional[str] = None
     judge_api_provider: Optional[str] = None
+    failed_primary_judge: Optional[Dict] = None
     
     def to_dict(self) -> Dict:
         """Convert to dictionary, excluding None values."""
