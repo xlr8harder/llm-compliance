@@ -106,6 +106,54 @@ def test_provider_error_code_is_preserved_in_status_reason():
     assert row.is_frpe_retry_candidate() is True
 
 
+def test_choice_provider_error_overrides_misleading_client_content_filter_sidecar():
+    row = _response(
+        {
+            "id": "gen-example",
+            "object": "chat.completion",
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "error",
+                    "native_finish_reason": None,
+                    "error": {
+                        "code": 502,
+                        "message": "Stream ended before a terminal response event",
+                        "metadata": {"error_type": "provider_unavailable"},
+                    },
+                    "message": {
+                        "role": "assistant",
+                        "content": "partial content before the stream failed",
+                    },
+                }
+            ],
+            "_llm_client": {
+                "success": False,
+                "is_retryable": False,
+                "error_info": {
+                    "type": "content_filter",
+                    "message": "Stream ended before a terminal response event",
+                    "finish_reason": "content_filter",
+                    "native_finish_reason": "error",
+                    "normalization_evidence": {
+                        "finish_reason": {
+                            "source": "choices[0].finish_reason",
+                            "value": "error",
+                            "normalized": "content_filter",
+                        }
+                    },
+                },
+                "request_format": "chat_completions",
+                "raw_response_format": "openrouter.chat_completions",
+            },
+        }
+    )
+
+    assert row.original_moderation_reason() is None
+    assert row.classify_response_status() == ("provider_error", "choice_error_code:502")
+    assert row.is_frpe_retry_candidate() is True
+
+
 def test_provider_safety_error_text_is_terminal_moderation():
     row = _response(
         {
@@ -116,6 +164,36 @@ def test_provider_safety_error_text_is_terminal_moderation():
                 ),
                 "code": 403,
             }
+        }
+    )
+
+    assert row.classify_response_status() == ("moderation", "moderation_error_text")
+    assert row.is_original_moderation_error() is True
+    assert row.is_frpe_retry_candidate() is False
+
+
+def test_openai_limited_bio_access_error_text_is_terminal_moderation():
+    row = _response(
+        {
+            "choices": [
+                {
+                    "finish_reason": "error",
+                    "native_finish_reason": None,
+                    "error": {
+                        "code": 400,
+                        "message": (
+                            "Invalid prompt: we've limited access to this content "
+                            "for safety reasons. This type of information may be "
+                            "used to benefit or to harm people."
+                        ),
+                        "metadata": {"error_type": "invalid_request"},
+                    },
+                    "message": {
+                        "role": "assistant",
+                        "content": "I cannot assist with that request.",
+                    },
+                }
+            ]
         }
     )
 

@@ -72,6 +72,7 @@ MODERATION_ERROR_TEXT_RE = re.compile(
     r"\bcensorship\b|"
     r"policy violation|"
     r"blocked by (?:safety|moderation)|"
+    r"limited access to this content for safety reasons|"
     r"\bmoderation\b"
     r")",
     re.IGNORECASE,
@@ -481,6 +482,9 @@ class ModelResponse:
 
     def original_moderation_reason(self) -> str | None:
         """Return the original-provider moderation/refusal stop reason, if any."""
+        if self._provider_error_reason() is not None:
+            return None
+
         finish_reason = self._finish_reason()
         native_finish_reason = self._native_finish_reason()
 
