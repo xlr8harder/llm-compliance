@@ -1,0 +1,2 @@
+{"id":"v2-ready-001","question":"Reply with exactly the word HELLO.","category":"v2_readiness","domain":"format_following"}
+{"id":"v2-ready-002","question":"What is two plus two? Reply with only the numeral.","category":"v2_readiness","domain":"basic_reasoning"}

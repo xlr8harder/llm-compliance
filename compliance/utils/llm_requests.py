@@ -5,10 +5,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-import llm_client
 from llm_client.retry import retry_request
 
 from ..models import ModelCatalog
+from .llm_client_api import get_provider
 
 
 def resolve_catalog_entry(
@@ -38,8 +38,9 @@ def request_model_response(
     force_subprovider: Optional[str] = None,
     timeout: int = 180,
     context: Optional[Dict[str, Any]] = None,
+    client_api: str = "legacy",
 ):
-    provider = llm_client.get_provider(provider_name)
+    provider = get_provider(provider_name, client_api)
 
     messages: List[Dict[str, str]] = []
     if system_prompt:

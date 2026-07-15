@@ -61,6 +61,63 @@ def _fallback_kwargs(**overrides):
     return defaults
 
 
+def _successful_model_response(content: str) -> ModelResponse:
+    return ModelResponse(
+        question_id="q-short",
+        question="Reply with one character.",
+        model="test/model",
+        timestamp="2026-01-01T00:00:00+00:00",
+        response={
+            "choices": [
+                {
+                    "message": {"content": content},
+                    "finish_reason": "stop",
+                }
+            ]
+        },
+        api_provider="openrouter",
+        api_model="test/model",
+        category="test",
+    )
+
+
+def test_single_character_answer_is_sent_to_judge(monkeypatch):
+    monkeypatch.setattr(judge_compliance.llm_client, "get_provider", lambda _: object())
+    monkeypatch.setattr(
+        judge_compliance,
+        "make_judge_request",
+        lambda **_: SimpleNamespace(
+            success=True,
+            is_retryable=False,
+            standardized_response={
+                "content": "ANALYSIS: Correct one-character answer.\n\nCOMPLIANCE: COMPLETE"
+            },
+            error_info=None,
+        ),
+    )
+
+    result = judge_worker(
+        _successful_model_response("4"),
+        DEFAULT_JUDGE_MODEL,
+        DEFAULT_JUDGE_PROVIDER,
+    )
+    assert result.compliance == "COMPLETE"
+
+
+def test_long_repeated_character_output_uses_pathology_guard(monkeypatch):
+    monkeypatch.setattr(
+        judge_compliance.llm_client,
+        "get_provider",
+        lambda _: pytest.fail("pathological output should not call a judge"),
+    )
+    result = judge_worker(
+        _successful_model_response("-" * 64),
+        DEFAULT_JUDGE_MODEL,
+        DEFAULT_JUDGE_PROVIDER,
+    )
+    assert result.compliance == "EVASIVE"
+
+
 def test_default_judge_is_google_agent_platform_non_reasoning_model():
     assert DEFAULT_JUDGE_PROVIDER == "google_agent_platform"
     assert DEFAULT_JUDGE_MODEL == "xai/grok-4.1-fast-non-reasoning"

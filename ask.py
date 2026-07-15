@@ -263,6 +263,9 @@ def response_payload_with_client_metadata(api_response) -> Dict[str, Any]:
         client_metadata["raw_response_format"] = api_response.raw_response_format
 
     response_payload["_llm_client"] = client_metadata
+    canonical = getattr(api_response, "canonical_conversation", None)
+    if isinstance(canonical, dict):
+        response_payload["_llm_client_v2"] = canonical
     return response_payload
 
 
@@ -468,6 +471,7 @@ def ask_worker(
     system_prompt: Optional[str] = None,
     force_subprovider: Optional[str] = None,
     timeout_seconds: int = 180,
+    llm_client_api: str = "legacy",
 ):
     if limiter:
         limiter.acquire()
@@ -482,6 +486,7 @@ def ask_worker(
         force_subprovider=force_subprovider,
         timeout=timeout_seconds,
         context={"qid": question.id},
+        client_api=llm_client_api,
     )
 
 ###############################################################################
@@ -496,6 +501,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     mode_group.add_argument("--detect", type=Path, help="existing responses file to resume")
 
     parser.add_argument("--provider", choices=llm_client.PROVIDER_MAP.keys(), help="API provider")
+    parser.add_argument(
+        "--llm-client-api",
+        choices=("legacy", "v2"),
+        default="legacy",
+        help="llm_client execution facade; legacy preserves existing behavior",
+    )
     parser.add_argument("--model", help="provider-specific model id")
     parser.add_argument("--canonical-name", dest="canonical_name", help="canonical model name for logging")
 
@@ -834,6 +845,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
                 args.system_prompt,
                 args.force_subprovider,
                 args.timeout_seconds,
+                args.llm_client_api,
             )
             future_map[future] = question
             return True
