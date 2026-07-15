@@ -40,6 +40,13 @@ Observed V1 and V2 invariants:
   one-character guard fix.
 - Re-running both V2 entrypoints produced zero pending rows and made no model
   requests.
+- OpenRouter Messages passed the same strict V1/V2 comparison for both rows.
+- OpenRouter Responses completed successfully through V2 and passed the
+  evaluator's terminal-metadata checks. The frozen V1 baseline returns
+  `invalid_option` for this protocol, so Responses is a deliberate V2 capability
+  addition rather than a parity claim.
+- The unchanged judging workflow consumed both V2 Messages and Responses files;
+  all four judged rows were classified `COMPLETE`.
 
 The comparison exposed and fixed:
 
@@ -49,6 +56,9 @@ The comparison exposed and fixed:
 - V2 moderation errors not projecting legacy `type=content_filter`.
 - A pre-existing judge shortcut that treated every one-character answer as a
   pathological repeated-character response.
+- Responses text being erased by the Chat-specific V1 compatibility normalizer.
+- Standard Responses and Messages fields producing misleading unknown-field
+  warnings.
 
 Generated prose is nondeterministic and is reported separately from structural
 compatibility. Run:
@@ -65,8 +75,6 @@ not make that a compatibility requirement.
 
 - Exercise moderation, truncation, provider error, retry, and malformed metadata
   against real providers; synthetic contract coverage exists for these shapes.
-- Run native Messages and Responses comparisons where OpenRouter supports the
-  same model over both protocols.
 - Validate the Google Agent Platform legacy-import bridge with live credentials.
 - Run larger threaded and resume/follow probes before changing the production
   default from `legacy`.

@@ -408,8 +408,8 @@ wheels = [
 
 [[package]]
 name = "llm-client"
-version = "0.2.1"
-source = { git = "https://github.com/xlr8harder/llm_client.git?rev=c8261781699d5ac02429190c4fa9bb02ee42ba96#c8261781699d5ac02429190c4fa9bb02ee42ba96" }
+version = "0.2.2"
+source = { git = "https://github.com/xlr8harder/llm_client.git?rev=639f30c94471b413d2325cce95f854da9af5ae93#639f30c94471b413d2325cce95f854da9af5ae93" }
 dependencies = [
     { name = "httpx" },
     { name = "pytest" },
@@ -436,9 +436,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "llm-client", git = "https://github.com/xlr8harder/llm_client.git?rev=c8261781699d5ac02429190c4fa9bb02ee42ba96" },
+    { name = "llm-client", git = "https://github.com/xlr8harder/llm_client.git?rev=639f30c94471b413d2325cce95f854da9af5ae93" },
     { name = "matplotlib", specifier = ">=3.10.8" },
-    { name = "mq", git = "https://github.com/xlr8harder/mq.git?rev=54614dda2c5f60f52b63a8d930fdbfa7e627a114" },
+    { name = "mq", git = "https://github.com/xlr8harder/mq.git?rev=1ebe1b1b8b463d8197c3226c082516ae8937b644" },
     { name = "numpy", specifier = ">=2.4.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "plotly", specifier = ">=6.5.0" },
@@ -549,8 +549,8 @@ wheels = [
 
 [[package]]
 name = "mq"
-version = "0.2.6"
-source = { git = "https://github.com/xlr8harder/mq.git?rev=54614dda2c5f60f52b63a8d930fdbfa7e627a114#54614dda2c5f60f52b63a8d930fdbfa7e627a114" }
+version = "0.2.7"
+source = { git = "https://github.com/xlr8harder/mq.git?rev=1ebe1b1b8b463d8197c3226c082516ae8937b644#1ebe1b1b8b463d8197c3226c082516ae8937b644" }
 dependencies = [
     { name = "llm-client" },
 ]

@@ -282,3 +282,55 @@ def test_v2_adapter_supports_parallel_independent_requests(monkeypatch):
         f"q-{index}" for index in range(20)
     }
     assert all(response.success for response in responses)
+
+
+def test_responses_payload_projects_text_for_existing_status_classifier():
+    response = SimpleNamespace(
+        error=None,
+        standardized_response={
+            "content": "HELLO",
+            "reasoning": None,
+            "finish_reason": "stop",
+            "native_finish_reason": "completed",
+            "usage": {"input_tokens": 4, "output_tokens": 1},
+        },
+        raw_provider_response={
+            "id": "resp-1",
+            "object": "response",
+            "status": "completed",
+            "model": "openai/test",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "HELLO"}],
+                }
+            ],
+            "usage": {"input_tokens": 4, "output_tokens": 1},
+        },
+    )
+    from compliance.utils.llm_client_api import _legacy_standardized_projection
+
+    standardized = _legacy_standardized_projection(
+        "openrouter",
+        "responses",
+        response.raw_provider_response,
+        response.standardized_response,
+        None,
+    )
+    assert standardized["content"] == "HELLO"
+    payload = dict(response.raw_provider_response)
+    payload["_llm_client"] = {
+        "success": True,
+        "is_retryable": False,
+        "standardized_response": standardized,
+    }
+    stored = ModelResponse(
+        question_id="q-responses",
+        question="Say hello",
+        model="openai/test",
+        timestamp="2026-01-01T00:00:00+00:00",
+        response=payload,
+    )
+    assert stored.final_content_text() == "HELLO"
+    assert stored.classify_response_status()[0] == "success"

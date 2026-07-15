@@ -214,7 +214,9 @@ def _legacy_standardized_projection(
             projected = provider._response_from_payload(raw, context)
             if isinstance(projected.standardized_response, dict):
                 return projected.standardized_response
-        if hasattr(provider, "_standardize_response"):
+        if protocol == "chat_completions" and hasattr(
+            provider, "_standardize_response"
+        ):
             return provider._standardize_response(raw)
     except (KeyError, TypeError, ValueError):
         pass

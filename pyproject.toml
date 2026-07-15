@@ -18,8 +18,8 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-llm-client = { git = "https://github.com/xlr8harder/llm_client.git", rev = "c8261781699d5ac02429190c4fa9bb02ee42ba96" }
-mq = { git = "https://github.com/xlr8harder/mq.git", rev = "54614dda2c5f60f52b63a8d930fdbfa7e627a114" }
+llm-client = { git = "https://github.com/xlr8harder/llm_client.git", rev = "639f30c94471b413d2325cce95f854da9af5ae93" }
+mq = { git = "https://github.com/xlr8harder/mq.git", rev = "1ebe1b1b8b463d8197c3226c082516ae8937b644" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
