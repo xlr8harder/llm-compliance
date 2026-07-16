@@ -240,6 +240,76 @@ def test_llm_client_standardized_success_metadata_is_used_for_direct_provider_sh
     )
 
 
+def test_tinker_llm_client_stop_sequence_is_success():
+    row = _response(
+        {
+            "sequences": [{"tokens": [200001, 200004, 200006]}],
+            "tinker": {
+                "base_model": "thinkingmachines/Inkling",
+                "model_path": None,
+                "renderer": "tml_v0",
+                "parse_termination": "stop_sequence",
+                "renderer_prompt_kwargs": {"effort": 0.0},
+            },
+            "_llm_client": {
+                "success": True,
+                "is_retryable": False,
+                "standardized_response": {
+                    "content": "direct answer",
+                    "usage": {
+                        "prompt_tokens": 43,
+                        "completion_tokens": 21,
+                        "total_tokens": 64,
+                    },
+                    "finish_reason": "stop",
+                    "native_finish_reason": "stop_sequence",
+                    "normalization_evidence": {
+                        "finish_reason": {
+                            "source": "renderer.parse_response[1]",
+                            "value": "stop_sequence",
+                            "normalized": "stop",
+                        }
+                    },
+                },
+                "request_format": "chat_completions",
+            },
+        },
+        model="thinkingmachines/inkling-64k",
+    )
+
+    assert row.final_content_text() == "direct answer"
+    assert row.classify_response_status() == (
+        "success",
+        "_llm_client.standardized_response.finish_reason:stop;native_finish_reason:stop_sequence",
+    )
+    row.ensure_known_response_status()
+    assert row.is_success() is True
+
+
+def test_llm_client_standardized_block_content_text_is_extracted():
+    row = _response(
+        {
+            "sequences": [{"tokens": [1, 2, 3]}],
+            "_llm_client": {
+                "success": True,
+                "is_retryable": False,
+                "standardized_response": {
+                    "content": [
+                        {"type": "thinking", "thinking": "internal"},
+                        {"type": "text", "text": "final answer"},
+                    ],
+                    "finish_reason": "stop",
+                    "native_finish_reason": "stop_sequence",
+                },
+            },
+        },
+        model="thinkingmachines/inkling-64k-reasoning",
+    )
+
+    assert row.final_content_text() == "final answer"
+    assert row.classify_response_status()[0] == "success"
+
+
 def test_llm_client_recitation_error_info_is_terminal_moderation():
     row = _response(
         {

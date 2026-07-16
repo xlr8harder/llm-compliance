@@ -23,6 +23,7 @@ SUCCESS_FINISH_REASONS = {
     "end_turn",
     "eos_token",
     "eos",
+    "stop_sequence",
 }
 MODERATION_FINISH_REASONS = {
     "content_filter",
@@ -285,6 +286,13 @@ class ModelResponse:
         standardized_content = self._llm_client_standardized_response().get("content")
         if isinstance(standardized_content, str):
             return standardized_content
+        if isinstance(standardized_content, list):
+            parts = [
+                block.get("text", "")
+                for block in standardized_content
+                if isinstance(block, dict) and isinstance(block.get("text"), str)
+            ]
+            return "".join(parts)
         return ""
 
     def _has_missing_final_content(self) -> bool:
