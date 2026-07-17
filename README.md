@@ -43,6 +43,29 @@ PYTHONPATH=. uv run python ask.py \
   --max-truncations 0
 ```
 
+For OpenRouter runs, `ask.py` excludes known heavily moderated upstream
+subproviders by default when possible. The current default exclude list is
+`Azure`, `Amazon Bedrock`, `Google`, `Google AI Studio`, and `Novita`. These
+routes have produced provider-side moderation that interferes with SpeechMap
+measurement. Use `--exclude-subprovider` to add more upstreams to the ignore
+list, `--allow-subprovider NAME` only for a deliberate exception, or
+`--force-subprovider OpenAI` when you need a specific upstream route. If a
+model result has many moderation rows, inspect the raw upstream `provider`
+values before accepting the run; a concentrated subprovider pattern is a route
+artifact to rerun, not model behavior.
+
+If OpenRouter has no acceptable upstream after these route constraints, the run
+aborts before writing provider-error rows. Decide explicitly whether to relax
+the route for a historical or creator-only model, force a known subprovider, or
+skip the model.
+
+For open-weight models, prefer third-party OpenRouter providers without hard
+moderation layers when available instead of a creator-only or known-moderated
+API route. Open-weight models should normally have near-zero provider-side
+moderation errors; elevated provider errors need route investigation before the
+result is committed. If no usable unmoderated route exists, keep the moderated
+rows only as an explicit exception.
+
 `ask.py` takes an exclusive advisory lock on the response file by default. If
 another writer already holds that lock, it exits instead of racing the file.
 `--skip-lock` exists only for manual recovery when you know no competing writer
@@ -84,6 +107,20 @@ Truncation cleanup is explicit. Use a larger `--max-tokens` and
 it. The default `--max-truncations 0` guard stops new traffic after the first
 new truncation, lets in-flight requests drain, writes collected rows, and exits
 so the run can be reviewed.
+
+Moderation cleanup is only appropriate after auditing the upstream provider
+route. To repair a known subprovider artifact, remove only the affected rows and
+rerun with the default blacklist still active:
+
+```bash
+PYTHONPATH=. uv run python ask.py \
+  --detect responses/us_hard_MODEL.jsonl \
+  --workers 30 \
+  --retry-moderation-subprovider Azure
+```
+
+This does not make moderation generally retryable; it is a targeted rerun of
+rows blocked by a named upstream route.
 
 ## Judge responses
 
@@ -193,7 +230,11 @@ Before committing a model eval, inspect every retained non-success row type and
 decide whether each bucket is acceptable to keep. Share aggregate error
 statistics for review first: counts by `response_status`, compliance error
 label, finish/native finish reason, provider error code/message family, and
-model/provider where relevant. Every prompt in the question set must have a
+model/provider/upstream subprovider where relevant. High moderation counts must
+include a subprovider breakdown; if a known-moderated route such as Azure,
+Amazon Bedrock, Google, or Novita dominates the failures, rerun those rows with
+that route excluded before sign-off. Every
+prompt in the question set must have a
 corresponding response row, even when that row is an error. Missing response
 rows, extra response rows, missing analysis rows, extra analysis rows, and
 unresolved quarantine sidecar files all block commit unless there is a

@@ -77,6 +77,16 @@ NEW_RESPONSE_BLOCKED_STATUSES = {
 }
 DEFAULT_MAX_TRUNCATIONS = 0
 TRUNCATION_ABORT_EXIT_CODE = 4
+ROUTE_ABORT_EXIT_CODE = 5
+DEFAULT_OPENROUTER_EXCLUDED_SUBPROVIDERS = (
+    "Azure",
+    "Amazon Bedrock",
+    "Google",
+    "Google AI Studio",
+    "Novita",
+)
+OPENROUTER_ALL_PROVIDERS_IGNORED_MESSAGE = "All providers have been ignored"
+OPENROUTER_NO_ENDPOINTS_FOUND_PREFIX = "No endpoints found for "
 
 # Human-readable anonymized model names
 ADJECTIVES: List[str] = [
@@ -239,6 +249,78 @@ def _is_empty_response(row: ModelResponse) -> bool:
         return True
 
 
+def parse_subprovider_args(values: Optional[List[str]]) -> List[str]:
+    """Parse repeatable and comma-separated subprovider CLI values."""
+    parsed: List[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        for item in value.split(","):
+            name = item.strip()
+            if not name:
+                continue
+            key = name.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            parsed.append(name)
+    return parsed
+
+
+def merge_subprovider_excludes(
+    *,
+    default_excludes: tuple[str, ...] = DEFAULT_OPENROUTER_EXCLUDED_SUBPROVIDERS,
+    extra_excludes: Optional[List[str]] = None,
+    allowed_subproviders: Optional[List[str]] = None,
+    failed_subproviders: Optional[List[str]] = None,
+) -> List[str]:
+    """Build the OpenRouter ignore_list while preserving explicit names."""
+    excluded: Dict[str, str] = {}
+    for name in list(default_excludes) + parse_subprovider_args(extra_excludes):
+        excluded[name.casefold()] = name
+    for name in parse_subprovider_args(allowed_subproviders):
+        excluded.pop(name.casefold(), None)
+    for name in parse_subprovider_args(failed_subproviders):
+        excluded.setdefault(name.casefold(), name)
+    return list(excluded.values())
+
+
+def response_subprovider(row: ModelResponse) -> Optional[str]:
+    if isinstance(row.response, dict):
+        provider = row.response.get("provider")
+        if isinstance(provider, str) and provider:
+            return provider
+    return None
+
+
+def subprovider_in_list(subprovider: Optional[str], names: List[str]) -> bool:
+    if not subprovider:
+        return False
+    return subprovider.casefold() in {name.casefold() for name in names}
+
+
+def api_response_error_message(api_response) -> Optional[str]:
+    raw_response = getattr(api_response, "raw_provider_response", None)
+    if isinstance(raw_response, dict):
+        error = raw_response.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return error["message"]
+    error_info = getattr(api_response, "error_info", None)
+    if isinstance(error_info, dict) and isinstance(error_info.get("message"), str):
+        return error_info["message"]
+    return None
+
+
+def openrouter_route_exhausted(api_response) -> bool:
+    message = api_response_error_message(api_response)
+    return bool(
+        message
+        and (
+            OPENROUTER_ALL_PROVIDERS_IGNORED_MESSAGE in message
+            or message.startswith(OPENROUTER_NO_ENDPOINTS_FOUND_PREFIX)
+        )
+    )
+
+
 def response_payload_with_client_metadata(api_response) -> Dict[str, Any]:
     """Return provider raw response with a non-destructive llm_client sidecar."""
     raw_response = api_response.raw_provider_response
@@ -279,12 +361,69 @@ def save_model_responses_in_place(rows: List[ModelResponse], responses_path: Pat
             handle.write(json.dumps(row.to_dict(), ensure_ascii=False) + "\n")
 
 
+def order_model_responses_like_existing(
+    rows: List[ModelResponse],
+    original_rows: List[ModelResponse],
+) -> List[ModelResponse]:
+    """Return rows in the pre-cleanup order, preserving new-row relative order."""
+    if not original_rows:
+        return rows
+    current_by_qid = {row.question_id: row for row in rows}
+    original_ids = {row.question_id for row in original_rows}
+    ordered_rows = [
+        current_by_qid.get(original.question_id, original)
+        for original in original_rows
+        if original.question_id in current_by_qid
+    ]
+    ordered_rows.extend(row for row in rows if row.question_id not in original_ids)
+    return ordered_rows
+
+
+def save_responses_like_existing_order(
+    responses_path: Path,
+    original_rows: List[ModelResponse],
+) -> None:
+    if not original_rows:
+        return
+    rows = load_model_responses(responses_path)
+    ordered_rows = order_model_responses_like_existing(rows, original_rows)
+    if [row.question_id for row in ordered_rows] == [row.question_id for row in rows]:
+        return
+    save_model_responses_in_place(ordered_rows, responses_path)
+
+
+def restore_removed_rows(
+    *,
+    responses_path: Path,
+    original_rows: List[ModelResponse],
+    kept_question_ids: set[str],
+) -> int:
+    """Restore rows removed for retry when a route-level precondition fails."""
+    current_rows = load_model_responses(responses_path)
+    current_by_qid = {row.question_id: row for row in current_rows}
+    restore_rows = [
+        row
+        for row in original_rows
+        if row.question_id not in kept_question_ids and row.question_id not in current_by_qid
+    ]
+    if not restore_rows:
+        return 0
+    original_ids = {row.question_id for row in original_rows}
+    ordered_rows: List[ModelResponse] = []
+    for original in original_rows:
+        ordered_rows.append(current_by_qid.get(original.question_id, original))
+    ordered_rows.extend(row for row in current_rows if row.question_id not in original_ids)
+    save_model_responses_in_place(ordered_rows, responses_path)
+    return len(restore_rows)
+
+
 def clean_frpe(
     responses_path: Path,
     *,
     retry_frpe: bool = True,
     retry_metadata_errors: bool = False,
     retry_truncations: bool = False,
+    retry_moderation_subproviders: Optional[List[str]] = None,
 ) -> List[ModelResponse]:
     existing_rows = load_model_responses(responses_path)
     ensure_known_response_rows(existing_rows, responses_path)
@@ -293,9 +432,11 @@ def clean_frpe(
     removed_error = 0
     removed_metadata_error = 0
     removed_truncation = 0
+    removed_subprovider_moderation = 0
     removed_duplicate = 0
     kept_moderation = 0
     seen_question_ids: set[str] = set()
+    retry_moderation_subproviders = parse_subprovider_args(retry_moderation_subproviders)
 
     for row in existing_rows:
         if retry_frpe and _is_empty_response(row):
@@ -305,6 +446,9 @@ def clean_frpe(
             removed_duplicate += 1
             continue
         if row.is_original_moderation_error():
+            if subprovider_in_list(response_subprovider(row), retry_moderation_subproviders):
+                removed_subprovider_moderation += 1
+                continue
             seen_question_ids.add(row.question_id)
             kept_rows.append(row)
             kept_moderation += 1
@@ -327,19 +471,21 @@ def clean_frpe(
         + removed_error
         + removed_metadata_error
         + removed_truncation
+        + removed_subprovider_moderation
         + removed_duplicate
     )
     if removed_total:
         LOGGER.info(
             (
                 "Retry cleanup: removed %d rows (retryable_errors=%d, metadata_errors=%d, "
-                "truncations=%d, "
+                "truncations=%d, subprovider_moderation=%d, "
                 "empty_response=%d, duplicate_question_id=%d, kept_original_moderation=%d)"
             ),
             removed_total,
             removed_error,
             removed_metadata_error,
             removed_truncation,
+            removed_subprovider_moderation,
             removed_empty,
             removed_duplicate,
             kept_moderation,
@@ -546,6 +692,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--retry-moderation-subprovider",
+        action="append",
+        default=[],
+        help=(
+            "remove terminal moderation rows from a named upstream subprovider before retrying. "
+            "May be repeated or comma-separated. Use only for audited provider-route artifacts, "
+            "for example Azure or Novita moderation on OpenRouter."
+        ),
+    )
+    parser.add_argument(
         "--anonymize",
         action="store_true",
         help=(
@@ -591,6 +747,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force-subprovider",
         help="OpenRouter only: restrict to a single subprovider (uses OpenRouter 'only').",
+    )
+    parser.add_argument(
+        "--exclude-subprovider",
+        action="append",
+        default=[],
+        help=(
+            "OpenRouter only: add subprovider(s) to the ignore list. May be repeated or "
+            "comma-separated. Known moderated backends are excluded by default."
+        ),
+    )
+    parser.add_argument(
+        "--allow-subprovider",
+        action="append",
+        default=[],
+        help=(
+            "OpenRouter only: remove subprovider(s) from the default ignore list. May be "
+            "repeated or comma-separated. Use --allow-subprovider Azure to permit Azure."
+        ),
     )
     parser.add_argument(
         "--skip-lock",
@@ -693,6 +867,9 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     if args.force_subprovider and provider_name != "openrouter":
         LOGGER.error("--force-subprovider is only supported with provider=openrouter")
         sys.exit(1)
+    if (args.exclude_subprovider or args.allow_subprovider) and provider_name != "openrouter":
+        LOGGER.error("--exclude-subprovider/--allow-subprovider are only supported with provider=openrouter")
+        sys.exit(1)
 
     catalog_entry = catalog.get_model(canonical_name) if canonical_name else None
     overrides: Dict[str, Any] = dict(catalog_entry.get_request_overrides()) if catalog_entry else {}
@@ -740,7 +917,16 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         request_overrides["max_tokens"] = args.max_tokens
     if request_format:
         request_overrides["request_format"] = request_format
-    subprov_info = f"subprov={args.force_subprovider or '<auto>'}"
+    default_ignore_list: Optional[List[str]] = None
+    if provider_name == "openrouter" and not args.force_subprovider:
+        default_ignore_list = merge_subprovider_excludes(
+            extra_excludes=args.exclude_subprovider,
+            allowed_subproviders=args.allow_subprovider,
+        )
+    subprov_info = (
+        f"subprov={args.force_subprovider or '<auto>'} "
+        f"ignore={default_ignore_list or '<none>'}"
+    )
     LOGGER.info(
         "Configuration → model=%s (canon=%s) provider=%s %s questions=%s overrides=%s %s anonymize=%s",
         api_model if not anonymize else "<anon>",
@@ -753,12 +939,20 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         "on" if anonymize else "off",
     )
 
-    if args.frpe or args.retry_metadata_errors or args.retry_truncations:
+    original_rows_before_cleanup: List[ModelResponse] = []
+    if (
+        args.frpe
+        or args.retry_metadata_errors
+        or args.retry_truncations
+        or args.retry_moderation_subprovider
+    ):
+        original_rows_before_cleanup = load_model_responses(responses_path)
         kept_rows = clean_frpe(
             responses_path,
             retry_frpe=args.frpe or args.retry_metadata_errors,
             retry_metadata_errors=args.retry_metadata_errors,
             retry_truncations=args.retry_truncations,
+            retry_moderation_subproviders=args.retry_moderation_subprovider,
         )
         done_ids = {row.question_id for row in kept_rows}
     else:
@@ -775,7 +969,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
         _print_final_state(responses_path)
         return
 
-    ignore_list: Optional[List[str]] = None
+    ignore_list: Optional[List[str]] = list(default_ignore_list) if default_ignore_list else None
     if args.coherency:
         LOGGER.info("Running coherency tests …")
         tests_passed, failed_subproviders = run_coherency_tests(
@@ -795,8 +989,14 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
                 LOGGER.error("Coherency tests FAILED – aborting")
                 sys.exit(1)
             if failed_subproviders:
-                ignore_list = failed_subproviders
+                ignore_list = merge_subprovider_excludes(
+                    extra_excludes=args.exclude_subprovider,
+                    allowed_subproviders=args.allow_subprovider,
+                    failed_subproviders=failed_subproviders,
+                )
                 LOGGER.info("OpenRouter: ignoring %s", ", ".join(ignore_list))
+    elif ignore_list:
+        LOGGER.info("OpenRouter: ignoring %s", ", ".join(ignore_list))
 
     LOGGER.info("Processing → output=%s", responses_path)
 
@@ -854,6 +1054,29 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
                 except Exception as exc:  # noqa: BLE001
                     LOGGER.exception("Worker raised for QID %s: %s", question.id, exc)
                     continue
+
+                if provider_name == "openrouter" and openrouter_route_exhausted(api_response):
+                    restored_count = restore_removed_rows(
+                        responses_path=responses_path,
+                        original_rows=original_rows_before_cleanup,
+                        kept_question_ids=done_ids,
+                    )
+                    LOGGER.error(
+                        (
+                            "OpenRouter has no acceptable upstream provider for model=%s after "
+                            "applying subprovider constraints (force=%s, ignore=%s). "
+                            "Aborting without writing a provider-error row for QID %s. "
+                            "Choose an explicit policy: relax the route with --allow-subprovider, "
+                            "force a known acceptable subprovider, or skip this model. "
+                            "Restored %d row(s) removed for this retry attempt."
+                        ),
+                        api_model,
+                        args.force_subprovider or "<none>",
+                        ignore_list or "<none>",
+                        question.id,
+                        restored_count,
+                    )
+                    sys.exit(ROUTE_ABORT_EXIT_CODE)
 
                 # Defensive logging: sometimes providers return an empty payload ({}).
                 # Keep a record but surface a warning so FRPE can cleanly retry later.
@@ -939,6 +1162,8 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
             responses_written,
             len(load_model_responses(responses_path)),
         )
+        if responses_written:
+            save_responses_like_existing_order(responses_path, original_rows_before_cleanup)
 
     # Print final state summary and absolute path for convenience
     _print_final_state(responses_path)
