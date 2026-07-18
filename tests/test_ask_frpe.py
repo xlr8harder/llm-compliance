@@ -316,6 +316,70 @@ def test_subprovider_allow_does_not_override_coherency_failure():
     ) == ["Amazon Bedrock", "Google", "Google AI Studio", "Novita", "Azure"]
 
 
+def test_coherency_api_base_override_sets_provider_class_and_strips_payload(
+    monkeypatch,
+):
+    class DummyProvider:
+        api_base = "https://old.example/v1"
+
+    observed = {}
+
+    def fake_get_provider(provider_name):
+        assert provider_name == "tngtech"
+        return DummyProvider()
+
+    def fake_run_coherency_tests(target_model_id, target_provider_name, **kwargs):
+        observed["api_base_during_call"] = DummyProvider().api_base
+        observed["request_overrides"] = kwargs["request_overrides"]
+        return True, []
+
+    monkeypatch.setattr(ask.llm_client, "get_provider", fake_get_provider)
+    monkeypatch.setattr(ask, "run_coherency_tests", fake_run_coherency_tests)
+
+    passed, failed_subproviders = ask._run_coherency_tests(
+        "tngtech/TNG-GLM-5-Chimera-X",
+        "tngtech",
+        openrouter_only=None,
+        num_workers=4,
+        request_overrides={
+            "api_base": "https://api.tng-chimera.ai/v1",
+            "reasoning": {"enabled": True},
+            "max_tokens": 16000,
+        },
+        verbose=True,
+    )
+
+    assert passed is True
+    assert failed_subproviders == []
+    assert observed["api_base_during_call"] == "https://api.tng-chimera.ai/v1"
+    assert observed["request_overrides"] == {
+        "reasoning": {"enabled": True},
+        "max_tokens": 16000,
+    }
+    assert DummyProvider.api_base == "https://old.example/v1"
+
+
+def test_coherency_api_base_override_rejects_unsupported_provider(monkeypatch):
+    class UnsupportedProvider:
+        pass
+
+    monkeypatch.setattr(
+        ask.llm_client,
+        "get_provider",
+        lambda provider_name: UnsupportedProvider(),
+    )
+
+    with pytest.raises(ValueError, match="does not support api_base override"):
+        ask._run_coherency_tests(
+            "model",
+            "unsupported",
+            openrouter_only=None,
+            num_workers=1,
+            request_overrides={"api_base": "https://api.example/v1"},
+            verbose=False,
+        )
+
+
 def test_new_metadata_error_response_is_blocked_before_main_write():
     row = _response(
         "new-null",

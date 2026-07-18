@@ -210,6 +210,44 @@ def classify_probe_result(result: Optional[Dict[str, Any]]) -> str:
     return PROBE_OUTCOME_MISSING_SUMMARY
 
 
+def required_run(
+    *,
+    mode: str,
+    canonical_name: str,
+    run_flags: Optional[List[str]],
+    request_overrides: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    return {
+        "mode": mode,
+        "canonical_name": canonical_name,
+        "run_flags": run_flags,
+        "request_overrides": request_overrides,
+    }
+
+
+def paired_required_runs(
+    *,
+    base_canonical_name: str,
+    reasoning_canonical_name: str,
+    base_run_flags: List[str],
+    reasoning_run_flags: List[str],
+    reasoning_request_overrides: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    return [
+        required_run(
+            mode="base",
+            canonical_name=base_canonical_name,
+            run_flags=base_run_flags,
+        ),
+        required_run(
+            mode="reasoning",
+            canonical_name=reasoning_canonical_name,
+            run_flags=reasoning_run_flags,
+            request_overrides=reasoning_request_overrides,
+        ),
+    ]
+
+
 def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) -> Dict[str, Any]:
     by_probe = {result["probe"]: result for result in results}
 
@@ -308,10 +346,13 @@ def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) 
         "base_run_flags": None,
         "reasoning_run_flags": None,
         "reasoning_request_overrides": None,
+        "required_runs": [],
         "notes": "Probe did not produce a clear recommendation.",
     }
 
     if default_present is False and reasoning_flags:
+        reasoning_canonical_name = f"{canonical_name}-reasoning"
+        base_run_flags = ["--no-reasoning"]
         if reasoning_probe == "reasoning-verbosity-max":
             notes = (
                 "Reasoning traces appear only when reasoning is enabled together with "
@@ -366,46 +407,81 @@ def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) 
         recommendation.update(
             {
                 "mode": "paired_modes",
-                "reasoning_canonical_name": f"{canonical_name}-reasoning",
-                "base_run_flags": ["--no-reasoning"],
+                "reasoning_canonical_name": reasoning_canonical_name,
+                "base_run_flags": base_run_flags,
                 "reasoning_run_flags": reasoning_flags,
                 "reasoning_request_overrides": reasoning_request_overrides,
+                "required_runs": paired_required_runs(
+                    base_canonical_name=canonical_name,
+                    reasoning_canonical_name=reasoning_canonical_name,
+                    base_run_flags=base_run_flags,
+                    reasoning_run_flags=reasoning_flags,
+                    reasoning_request_overrides=reasoning_request_overrides,
+                ),
                 "notes": notes,
             }
         )
         return recommendation
 
     if default_present is True and no_reasoning_present is False:
+        reasoning_canonical_name = f"{canonical_name}-reasoning"
+        base_run_flags = ["--no-reasoning"]
+        resolved_reasoning_flags = reasoning_flags or ["--reasoning"]
         recommendation.update(
             {
                 "mode": "paired_modes",
-                "reasoning_canonical_name": f"{canonical_name}-reasoning",
-                "base_run_flags": ["--no-reasoning"],
-                "reasoning_run_flags": reasoning_flags or ["--reasoning"],
+                "reasoning_canonical_name": reasoning_canonical_name,
+                "base_run_flags": base_run_flags,
+                "reasoning_run_flags": resolved_reasoning_flags,
                 "reasoning_request_overrides": reasoning_request_overrides,
+                "required_runs": paired_required_runs(
+                    base_canonical_name=canonical_name,
+                    reasoning_canonical_name=reasoning_canonical_name,
+                    base_run_flags=base_run_flags,
+                    reasoning_run_flags=resolved_reasoning_flags,
+                    reasoning_request_overrides=reasoning_request_overrides,
+                ),
                 "notes": "Default responses include reasoning traces, but explicit --no-reasoning suppresses them.",
             }
         )
         return recommendation
 
     if default_present is True and reasoning_present_effort_none is False:
+        reasoning_canonical_name = f"{canonical_name}-reasoning"
+        base_run_flags = ["--reasoning", "--reasoning-effort", "none"]
+        resolved_reasoning_flags = reasoning_flags or ["--reasoning"]
         recommendation.update(
             {
                 "mode": "paired_modes",
-                "reasoning_canonical_name": f"{canonical_name}-reasoning",
-                "base_run_flags": ["--reasoning", "--reasoning-effort", "none"],
-                "reasoning_run_flags": reasoning_flags or ["--reasoning"],
+                "reasoning_canonical_name": reasoning_canonical_name,
+                "base_run_flags": base_run_flags,
+                "reasoning_run_flags": resolved_reasoning_flags,
                 "reasoning_request_overrides": reasoning_request_overrides,
+                "required_runs": paired_required_runs(
+                    base_canonical_name=canonical_name,
+                    reasoning_canonical_name=reasoning_canonical_name,
+                    base_run_flags=base_run_flags,
+                    reasoning_run_flags=resolved_reasoning_flags,
+                    reasoning_request_overrides=reasoning_request_overrides,
+                ),
                 "notes": 'Default responses include reasoning traces, but reasoning.effort="none" suppresses them.',
             }
         )
         return recommendation
 
     if default_present is True and no_reasoning_outcome == PROBE_OUTCOME_REASONING_MANDATORY:
+        base_run_flags = reasoning_flags or ["--reasoning"]
         recommendation.update(
             {
                 "mode": "single_mode_reasoning_only",
-                "base_run_flags": reasoning_flags or ["--reasoning"],
+                "base_run_flags": base_run_flags,
+                "required_runs": [
+                    required_run(
+                        mode="reasoning",
+                        canonical_name=canonical_name,
+                        run_flags=base_run_flags,
+                    )
+                ],
                 "notes": (
                     "Default responses include reasoning traces, and the provider rejects attempts "
                     "to disable reasoning. Treat this as a mandatory-reasoning single mode."
@@ -415,20 +491,36 @@ def recommend_configuration(canonical_name: str, results: List[Dict[str, Any]]) 
         return recommendation
 
     if default_present is False and reasoning_flags is None:
+        base_run_flags = ["--no-reasoning"]
         recommendation.update(
             {
                 "mode": "single_mode_base_only",
-                "base_run_flags": ["--no-reasoning"],
+                "base_run_flags": base_run_flags,
+                "required_runs": [
+                    required_run(
+                        mode="base",
+                        canonical_name=canonical_name,
+                        run_flags=base_run_flags,
+                    )
+                ],
                 "notes": "No reasoning traces were observed, even when reasoning was explicitly enabled.",
             }
         )
         return recommendation
 
     if default_present is True and no_reasoning_present is True:
+        base_run_flags = ["--reasoning"]
         recommendation.update(
             {
                 "mode": "single_mode_reasoning_only",
-                "base_run_flags": ["--reasoning"],
+                "base_run_flags": base_run_flags,
+                "required_runs": [
+                    required_run(
+                        mode="reasoning",
+                        canonical_name=canonical_name,
+                        run_flags=base_run_flags,
+                    )
+                ],
                 "notes": "Reasoning traces were present in default and explicit --no-reasoning probes, so the provider appears to expose only one reasoning-like mode.",
             }
         )
@@ -496,6 +588,7 @@ def print_human_report(
     print(f"reasoning_canonical_name={recommendation.get('reasoning_canonical_name')}")
     print(f"reasoning_run_flags={recommendation.get('reasoning_run_flags')}")
     print(f"reasoning_request_overrides={recommendation.get('reasoning_request_overrides')}")
+    print(f"required_runs={recommendation.get('required_runs')}")
     print(f"notes={recommendation['notes']}")
 
 

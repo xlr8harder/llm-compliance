@@ -207,6 +207,56 @@ def test_recommendation_includes_messages_request_format_for_adaptive_probe():
     assert recommendation["reasoning_request_overrides"]["request_format"] == "anthropic_messages"
     assert recommendation["reasoning_request_overrides"]["thinking"] == {"type": "adaptive"}
     assert recommendation["reasoning_request_overrides"]["output_config"] == {"effort": "high"}
+    assert recommendation["required_runs"] == [
+        {
+            "mode": "base",
+            "canonical_name": "anthropic/claude-opus-4.7",
+            "run_flags": ["--no-reasoning"],
+            "request_overrides": None,
+        },
+        {
+            "mode": "reasoning",
+            "canonical_name": "anthropic/claude-opus-4.7-reasoning",
+            "run_flags": [
+                "--reasoning",
+                "--request-format",
+                "anthropic_messages",
+                "--reasoning-effort",
+                "high",
+            ],
+            "request_overrides": {
+                "request_format": "anthropic_messages",
+                "thinking": {"type": "adaptive"},
+                "output_config": {"effort": "high"},
+            },
+        },
+    ]
+
+
+def test_recommendation_required_runs_make_explicit_reasoning_pair_mandatory():
+    recommendation = recommend_configuration(
+        "mistralai/mistral-medium-3.5-2604",
+        [
+            {"probe": "default", "summary": {"reasoning_present": False}},
+            {"probe": "reasoning", "summary": {"reasoning_present": True}},
+        ],
+    )
+
+    assert recommendation["mode"] == "paired_modes"
+    assert recommendation["required_runs"] == [
+        {
+            "mode": "base",
+            "canonical_name": "mistralai/mistral-medium-3.5-2604",
+            "run_flags": ["--no-reasoning"],
+            "request_overrides": None,
+        },
+        {
+            "mode": "reasoning",
+            "canonical_name": "mistralai/mistral-medium-3.5-2604-reasoning",
+            "run_flags": ["--reasoning"],
+            "request_overrides": None,
+        },
+    ]
 
 def test_ask_overrides_enable_anthropic_messages_adaptive_high_by_default():
     overrides, request_format = apply_reasoning_request_overrides(

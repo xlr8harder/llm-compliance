@@ -49,6 +49,11 @@ def request_model_response(
     kwargs: Dict[str, Any] = {}
     if overrides:
         kwargs.update(overrides)
+    api_base = kwargs.pop("api_base", None)
+    if api_base is not None:
+        if not hasattr(provider, "api_base"):
+            raise ValueError(f"provider={provider_name} does not support api_base override")
+        provider.api_base = api_base
     kwargs.setdefault("timeout", timeout)
 
     if provider_name == "openrouter":

@@ -258,3 +258,8 @@
 {"canonical_name": "meta/muse-spark-1.1", "providers": [{"provider_name": "openrouter", "provider_model_id": "meta/muse-spark-1.1", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}, "max_tokens": 16000}}
 {"canonical_name": "deepseek/deepseek-r1", "providers": [{"provider_name": "openrouter", "provider_model_id": "deepseek/deepseek-r1", "priority": 0}]}
 {"canonical_name": "deepseek/deepseek-chat", "providers": [{"provider_name": "openrouter", "provider_model_id": "deepseek/deepseek-chat", "priority": 0}]}
+{"canonical_name": "tencent/hy3", "providers": [{"provider_name": "openrouter", "provider_model_id": "tencent/hy3", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}, "max_tokens": 16000}}
+{"canonical_name": "tencent/hy3-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "tencent/hy3", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}, "max_tokens": 16000}}
+{"canonical_name": "mistralai/mistral-medium-3.5-2604", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/mistral-medium-3-5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": false}, "max_tokens": 16000}}
+{"canonical_name": "mistralai/mistral-medium-3.5-2604-reasoning", "providers": [{"provider_name": "openrouter", "provider_model_id": "mistralai/mistral-medium-3-5", "priority": 0}], "request_overrides": {"reasoning": {"enabled": true}, "max_tokens": 32000}}
+{"canonical_name": "tngtech/tng-glm-5-chimera-x", "providers": [{"provider_name": "tngtech", "provider_model_id": "tngtech/TNG-GLM-5-Chimera-X", "priority": 0}], "request_overrides": {"api_base": "https://api.tng-chimera.ai/v1", "reasoning": {"enabled": true}, "max_tokens": 16000}}

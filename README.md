@@ -85,6 +85,15 @@ canonical entries, usually `MODEL` and `MODEL-reasoning`. For models where the
 mode cannot be controlled reliably, run only the supported mode and do not add a
 local mode suffix.
 
+`recommendation_mode=paired_modes` is a collection requirement, not a hint:
+collect and judge both required runs before treating the model as complete. The
+probe output includes a `required_runs` list with the expected canonical names
+and run flags. Skip one side of a pair only after an explicit decision, and
+record the reason. Cost or length concerns should be surfaced before changing
+which modes are collected; use `--max-truncations 0` to make long reasoning
+runs stop at the first capped response instead of silently accepting partial
+answers.
+
 ## Retry response errors
 
 `ask.py --frpe` is for original-model failures that are worth retrying, such as

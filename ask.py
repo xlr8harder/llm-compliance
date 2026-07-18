@@ -20,6 +20,7 @@ Features
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
 import logging
 import os
@@ -27,7 +28,7 @@ import sys
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Iterator, Tuple
 import threading
 import time
 from collections import deque
@@ -87,6 +88,58 @@ DEFAULT_OPENROUTER_EXCLUDED_SUBPROVIDERS = (
 )
 OPENROUTER_ALL_PROVIDERS_IGNORED_MESSAGE = "All providers have been ignored"
 OPENROUTER_NO_ENDPOINTS_FOUND_PREFIX = "No endpoints found for "
+
+
+@contextmanager
+def _temporary_provider_api_base(
+    provider_name: str,
+    request_overrides: Optional[Dict[str, Any]],
+) -> Iterator[None]:
+    api_base = request_overrides.get("api_base") if request_overrides else None
+    if api_base is None:
+        yield
+        return
+
+    provider = llm_client.get_provider(provider_name)
+    provider_class = type(provider)
+    if not hasattr(provider, "api_base"):
+        raise ValueError(f"provider={provider_name} does not support api_base override")
+
+    original_api_base = getattr(provider_class, "api_base")
+    provider_class.api_base = api_base
+    try:
+        yield
+    finally:
+        provider_class.api_base = original_api_base
+
+
+def _coherency_request_overrides(
+    request_overrides: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    if not request_overrides:
+        return None
+    cleaned = dict(request_overrides)
+    cleaned.pop("api_base", None)
+    return cleaned or None
+
+
+def _run_coherency_tests(
+    target_model_id: str,
+    target_provider_name: str,
+    openrouter_only: Optional[List[str]],
+    num_workers: int,
+    request_overrides: Optional[Dict[str, Any]],
+    verbose: bool,
+) -> Tuple[bool, List[str]]:
+    with _temporary_provider_api_base(target_provider_name, request_overrides):
+        return run_coherency_tests(
+            target_model_id,
+            target_provider_name,
+            openrouter_only=openrouter_only,
+            num_workers=num_workers,
+            request_overrides=_coherency_request_overrides(request_overrides),
+            verbose=verbose,
+        )
 
 # Human-readable anonymized model names
 ADJECTIVES: List[str] = [
@@ -972,7 +1025,7 @@ def main(argv: Optional[List[str]] = None) -> None:  # noqa: D401
     ignore_list: Optional[List[str]] = list(default_ignore_list) if default_ignore_list else None
     if args.coherency:
         LOGGER.info("Running coherency tests …")
-        tests_passed, failed_subproviders = run_coherency_tests(
+        tests_passed, failed_subproviders = _run_coherency_tests(
             api_model,
             provider_name,
             openrouter_only=[args.force_subprovider] if args.force_subprovider else None,
