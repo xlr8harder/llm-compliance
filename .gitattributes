@@ -49,5 +49,17 @@ responses/us_hard_thinkingmachines_inkling-64k-reasoning.jsonl filter=lfs diff=l
 responses/us_hard_thinkingmachines_inkling-64k.jsonl filter=lfs diff=lfs merge=lfs -text
 analysis/compliance_us_hard_meta_muse-spark-1.1.jsonl filter=lfs diff=lfs merge=lfs -text
 analysis/compliance_us_hard_moonshotai_kimi-k3.jsonl filter=lfs diff=lfs merge=lfs -text
+analysis/compliance_us_hard_mistralai_mistral-medium-3.5-2604-reasoning.jsonl filter=lfs diff=lfs merge=lfs -text
+analysis/compliance_us_hard_mistralai_mistral-medium-3.5-2604.jsonl filter=lfs diff=lfs merge=lfs -text
+analysis/compliance_us_hard_tencent_hy3-reasoning.jsonl filter=lfs diff=lfs merge=lfs -text
+analysis/compliance_us_hard_tencent_hy3.jsonl filter=lfs diff=lfs merge=lfs -text
+analysis/compliance_us_hard_meituan_longcat-2.0-reasoning.jsonl filter=lfs diff=lfs merge=lfs -text
+analysis/compliance_us_hard_meituan_longcat-2.0.jsonl filter=lfs diff=lfs merge=lfs -text
 responses/us_hard_meta_muse-spark-1.1.jsonl filter=lfs diff=lfs merge=lfs -text
 responses/us_hard_moonshotai_kimi-k3.jsonl filter=lfs diff=lfs merge=lfs -text
+responses/us_hard_mistralai_mistral-medium-3.5-2604-reasoning.jsonl filter=lfs diff=lfs merge=lfs -text
+responses/us_hard_mistralai_mistral-medium-3.5-2604.jsonl filter=lfs diff=lfs merge=lfs -text
+responses/us_hard_tencent_hy3-reasoning.jsonl filter=lfs diff=lfs merge=lfs -text
+responses/us_hard_tencent_hy3.jsonl filter=lfs diff=lfs merge=lfs -text
+responses/us_hard_meituan_longcat-2.0-reasoning.jsonl filter=lfs diff=lfs merge=lfs -text
+responses/us_hard_meituan_longcat-2.0.jsonl filter=lfs diff=lfs merge=lfs -text

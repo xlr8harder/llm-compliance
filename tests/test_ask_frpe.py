@@ -325,7 +325,7 @@ def test_coherency_api_base_override_sets_provider_class_and_strips_payload(
     observed = {}
 
     def fake_get_provider(provider_name):
-        assert provider_name == "tngtech"
+        assert provider_name == "custom-provider"
         return DummyProvider()
 
     def fake_run_coherency_tests(target_model_id, target_provider_name, **kwargs):
@@ -337,12 +337,12 @@ def test_coherency_api_base_override_sets_provider_class_and_strips_payload(
     monkeypatch.setattr(ask, "run_coherency_tests", fake_run_coherency_tests)
 
     passed, failed_subproviders = ask._run_coherency_tests(
-        "tngtech/TNG-GLM-5-Chimera-X",
-        "tngtech",
+        "example/custom-model",
+        "custom-provider",
         openrouter_only=None,
         num_workers=4,
         request_overrides={
-            "api_base": "https://api.tng-chimera.ai/v1",
+            "api_base": "https://api.example-override.invalid/v1",
             "reasoning": {"enabled": True},
             "max_tokens": 16000,
         },
@@ -351,7 +351,7 @@ def test_coherency_api_base_override_sets_provider_class_and_strips_payload(
 
     assert passed is True
     assert failed_subproviders == []
-    assert observed["api_base_during_call"] == "https://api.tng-chimera.ai/v1"
+    assert observed["api_base_during_call"] == "https://api.example-override.invalid/v1"
     assert observed["request_overrides"] == {
         "reasoning": {"enabled": True},
         "max_tokens": 16000,
