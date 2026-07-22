@@ -19,3 +19,4 @@ __pycache__/
 .ruff_cache/
 responses/*.jsonl.metadata_error.jsonl
 responses/*.jsonl.unknown_metadata.jsonl
+/archive/prerelease/
