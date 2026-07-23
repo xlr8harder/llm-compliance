@@ -1,22 +1,19 @@
 .*.sw?
 .DS_Store
-__pycache__
 .env
 .env.*
 !.env.example
-.lexical_diversity_cache.pkl
 .secret
-# Lab generated artifacts
-/outputs/
-/prime-rl/
-/environments/*/outputs/
-/environments/*/dist/
-/environments/*/*.egg-info/
-/environments/*/__pycache__/
+.venv/
+.venv-*/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+
+# Quarantine sidecars are temporary and block data commits until resolved.
 responses/*.jsonl.metadata_error.jsonl
 responses/*.jsonl.unknown_metadata.jsonl
+
+# Local archival and recovery staging.
 /archive/prerelease/
